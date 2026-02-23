@@ -133,14 +133,42 @@ fi
 
 # --- Verify (retry — speaker needs a few seconds after cold boot) ---
 log info "addUser accepted (status 101) — verifying..."
+primed=false
 for i in 1 2 3 4 5; do
     sleep $((i * 2))
     active_user=$(curl -sf --max-time 5 "${ZC_URL}?action=getInfo" | json_str activeUser)
     if [ -n "$active_user" ]; then
         log info "Speaker primed successfully (activeUser=$active_user)"
-        exit 0
+        primed=true
+        break
     fi
 done
 
-log warning "Speaker accepted addUser but activeUser still empty after 30s"
-exit 1
+if [ "$primed" != "true" ]; then
+    log warning "Speaker accepted addUser but activeUser still empty after 30s"
+    exit 1
+fi
+
+# --- Activate speaker via Spotify Web API ---
+# ZeroConf priming registers the speaker with Spotify but leaves it idle.
+# The Spotify desktop app activates the streaming session by calling
+# PUT /v1/me/player — we replicate that via soundcork so that SoundTouch
+# presets can initiate Spotify playback without manual intervention.
+log info "Activating speaker streaming session via soundcork..."
+sleep 5  # give the speaker time to register with Spotify's servers
+
+activate_response=$(curl -sf --max-time 60 \
+    -X POST \
+    -u "${SOUNDCORK_USER}:${SOUNDCORK_PASS}" \
+    "${SOUNDCORK_URL}/mgmt/spotify/activate-speaker?device_name=Bose" \
+    2>&1)
+
+if [ $? -ne 0 ] || [ -z "$activate_response" ]; then
+    log warning "Speaker activation failed (presets may not work until Spotify app connects)"
+    # Non-fatal: ZeroConf priming succeeded, Spotify Connect works.
+    # Only SoundTouch preset playback is affected.
+    exit 0
+fi
+
+log info "Speaker activated: ${activate_response}"
+exit 0

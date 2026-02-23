@@ -4,6 +4,7 @@ Handles the authorization code flow, token management, and entity
 resolution for the ueberboese-app's Spotify features.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -307,3 +308,87 @@ class SpotifyService:
             image_url = images[0].get("url")
 
         return {"name": name, "imageUrl": image_url}
+
+    async def activate_speaker(
+        self,
+        device_name_hint: str = "Bose",
+        max_retries: int = 5,
+        retry_delay: float = 5.0,
+    ) -> dict:
+        """Transfer the Spotify playback session to a speaker.
+
+        After ZeroConf priming the speaker is registered with Spotify's
+        servers but idle.  Transferring playback via the Web API triggers
+        Spotify to push an activation command to the speaker over its AP
+        connection, which is exactly what the Spotify desktop/web app does
+        when you select the speaker as playback device.
+
+        Without this step the speaker's embedded Spotify SDK cannot
+        initiate playback for SoundTouch presets (stuck in BUFFERING_STATE).
+
+        Args:
+            device_name_hint: Substring to match in the Spotify Connect
+                device name (case-insensitive).
+            max_retries: How many times to poll for the device to appear
+                in the Spotify device list after ZeroConf priming.
+            retry_delay: Seconds between retries.
+
+        Returns:
+            Dict with ``id``, ``name``, and ``activated`` flag.
+        """
+        access_token = await self._get_valid_token()
+
+        speaker = None
+        devices: list[dict] = []
+        for attempt in range(1, max_retries + 1):
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{SPOTIFY_API_BASE}/me/player/devices",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+
+            if response.status_code != 200:
+                raise RuntimeError(f"Failed to list Spotify devices: {response.text}")
+
+            devices = response.json().get("devices", [])
+            speaker = next(
+                (d for d in devices if device_name_hint.lower() in d.get("name", "").lower()),
+                None,
+            )
+            if speaker:
+                break
+
+            if attempt < max_retries:
+                logger.info(
+                    "Speaker not found yet (attempt %d/%d, hint='%s'), retrying in %ds...",
+                    attempt,
+                    max_retries,
+                    device_name_hint,
+                    int(retry_delay),
+                )
+                await asyncio.sleep(retry_delay)
+
+        if not speaker:
+            available = [d.get("name") for d in devices]
+            raise RuntimeError(f"Speaker not found (hint='{device_name_hint}'). Available: {available}")
+
+        # Transfer playback to the speaker without starting audio.
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"{SPOTIFY_API_BASE}/me/player",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                json={"device_ids": [speaker["id"]], "play": False},
+            )
+
+        if response.status_code not in (200, 204):
+            raise RuntimeError(f"Failed to transfer playback: {response.text}")
+
+        logger.info(
+            "Playback transferred to speaker '%s' (id=%s)",
+            speaker["name"],
+            speaker["id"],
+        )
+        return {"id": speaker["id"], "name": speaker["name"], "activated": True}

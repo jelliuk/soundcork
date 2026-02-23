@@ -239,6 +239,27 @@ def spotify_token(
     return {"accessToken": access_token, "username": user_id}
 
 
+@router.post("/spotify/activate-speaker")
+async def activate_speaker(
+    device_name: str = Query("Bose", description="Substring to match in Spotify Connect device name"),
+    _user: str = Depends(verify_credentials),
+):
+    """Transfer the Spotify playback session to the speaker.
+
+    After ZeroConf priming the speaker is registered with Spotify but
+    idle.  This endpoint does what the Spotify desktop app does when you
+    select the speaker: it calls ``PUT /v1/me/player`` to transfer the
+    session, which triggers Spotify's servers to activate streaming on
+    the device.  Called by the on-speaker boot primer after addUser.
+    """
+    try:
+        result = await spotify.activate_speaker(device_name_hint=device_name)
+        return result
+    except Exception as e:
+        logger.exception("Failed to activate speaker")
+        raise HTTPException(status_code=503, detail=str(e))
+
+
 @router.post("/spotify/entity")
 async def spotify_entity(
     request: Request,
