@@ -56,7 +56,7 @@ _MGMT_ALLOWED_PATHS = frozenset(
     }
 )
 # Paths that are allowed as prefixes (e.g. accounts/{id}/speakers)
-_MGMT_ALLOWED_PREFIXES = ("accounts/",)
+_MGMT_ALLOWED_PREFIXES = ("accounts/", "devices/")
 
 
 def _is_private_ip(hostname: str) -> bool:
@@ -344,7 +344,7 @@ async def proxy_mgmt_post(path: str, request: Request):
 @router.get("/api/speaker/{ip}/{path:path}")
 async def proxy_speaker_get(ip: str, path: str):
     """Proxy GET requests to a speaker on the LAN."""
-    if not _get_speaker_allowlist().is_registered_speaker(ip):
+    if not _get_speaker_allowlist().is_allowed(ip):
         return JSONResponse({"detail": "Forbidden: unregistered speaker IP"}, status_code=403)
     try:
         async with httpx.AsyncClient() as client:
@@ -366,7 +366,7 @@ async def proxy_speaker_get(ip: str, path: str):
 @router.post("/api/speaker/{ip}/{path:path}")
 async def proxy_speaker_post(ip: str, path: str, request: Request):
     """Proxy POST requests to a speaker on the LAN."""
-    if not _get_speaker_allowlist().is_registered_speaker(ip):
+    if not _get_speaker_allowlist().is_allowed(ip):
         return JSONResponse({"detail": "Forbidden: unregistered speaker IP"}, status_code=403)
     body = await request.body()
     try:
@@ -477,7 +477,7 @@ SPEAKER_WS_PORT = 8080
 @router.websocket("/ws/speaker/{ip}")
 async def proxy_speaker_websocket(websocket: WebSocket, ip: str):
     """Proxy WebSocket connections to a speaker for real-time updates."""
-    if not _get_speaker_allowlist().is_registered_speaker(ip):
+    if not _get_speaker_allowlist().is_allowed(ip):
         await websocket.close(code=4003, reason="Unregistered speaker IP")
         return
     await websocket.accept(subprotocol="gabbo")
