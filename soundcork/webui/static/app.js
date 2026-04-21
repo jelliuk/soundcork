@@ -1017,7 +1017,7 @@ function renderSpeakerDetail(main, ip) {
           // Play the preset
           (async () => {
             try {
-              await api.speakerPost(ip, 'select', contentItemXml(preset));
+              await api.speakerPost(ip, 'select', '<select>' + contentItemXml(preset) + '</select>');
               showToast(`Playing preset ${presetId}`, 'success');
             } catch (err) { showToast(err.message, 'error'); }
           })();
@@ -1158,7 +1158,7 @@ function renderPresetDetail(main, ip, presetId) {
 
       container.querySelector('#preset-play').addEventListener('click', async () => {
         try {
-          await api.speakerPost(ip, 'select', contentItemXml(preset));
+          await api.speakerPost(ip, 'select', '<select>' + contentItemXml(preset) + '</select>');
           showToast(`Playing preset ${presetId}`, 'success');
         } catch (err) { showToast(err.message, 'error'); }
       });
@@ -1532,7 +1532,7 @@ function renderRecents(main, ip) {
 
         item.querySelector('.play-btn').addEventListener('click', async () => {
           try {
-            await api.speakerPost(ip, 'select', contentItemXml(r));
+            await api.speakerPost(ip, 'select', '<select>' + contentItemXml(r) + '</select>');
             showToast(`Playing ${r.itemName}`, 'success');
           } catch (err) { showToast(err.message, 'error'); }
         });
