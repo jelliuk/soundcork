@@ -27,12 +27,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Initialise CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: python
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
 
   container-scan:
     runs-on: ubuntu-latest
@@ -43,6 +43,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build image for scanning
         uses: docker/build-push-action@v6
         with:
@@ -50,18 +53,30 @@ jobs:
           push: false
           load: true
           tags: soundcork:scan
+          # Use GHA cache to avoid rebuilding layers unnecessarily
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: soundcork:scan
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
           exit-code: '1'
+          # Ignore CVEs with no available fix — these are typically base image
+          # OS packages where no upstream patch exists yet and cannot be
+          # resolved without changing the base image itself.
+          ignore-unfixed: true
+          # Limit to known vulnerability types — excludes misconfiguration
+          # and secret scanning noise which are covered by other jobs.
+          vuln-type: os,library
 
       - name: Upload Trivy results to Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
+        # Run even if Trivy found vulnerabilities so results always appear
+        # in the Security tab regardless of exit code.
         if: always()
         with:
           sarif_file: trivy-results.sarif
