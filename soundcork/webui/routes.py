@@ -483,7 +483,7 @@ async def proxy_speaker_websocket(websocket: WebSocket, ip: str):
     await websocket.accept(subprotocol="gabbo")
     speaker_uri = f"ws://{ip}:{SPEAKER_WS_PORT}"
     try:
-        async with websockets.connect(speaker_uri, subprotocols=["gabbo"]) as speaker_ws:
+        async with websockets.connect(speaker_uri, subprotocols=[websockets.Subprotocol("gabbo")]) as speaker_ws:
 
             async def browser_to_speaker():
                 try:
