@@ -1,0 +1,194 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+    paths-ignore:
+      - README.md
+      - CHANGELOG.md
+      - LICENSE.md
+      - .gitignore
+      - .github/**
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - README.md
+      - CHANGELOG.md
+      - LICENSE.md
+      - .gitignore
+      - .github/**
+  schedule:
+    # Monthly rebuild ensures the published image picks up base image
+    # OS security patches even without code changes.
+    - cron: '0 2 1 * *'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+
+  # ── Stage 1 ────────────────────────────────────────────────────────────────
+  # Lint is the fastest check and the most likely to catch trivial errors.
+  # Running it first avoids spending runner time on tests or builds when
+  # there is a straightforward formatting or import issue to fix.
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Ruff check
+        uses: astral-sh/ruff-action@v4
+        with:
+          args: check
+
+      - name: Ruff format
+        uses: astral-sh/ruff-action@v4
+        with:
+          args: format --check
+
+  # ── Stage 2 ────────────────────────────────────────────────────────────────
+  # Test and typecheck run in parallel with each other but only after lint
+  # passes. They are independent — a type error does not indicate a test
+  # failure and vice versa — so parallel execution gives faster feedback
+  # without masking information.
+
+  test:
+    name: Test
+    needs: lint
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ \
+            --cov=soundcork \
+            --cov-report=term-missing \
+            --cov-report=xml
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v5
+        if: always()
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+
+  typecheck:
+    name: Type check
+    needs: lint
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install mypy
+
+      - name: Run mypy
+        run: mypy soundcork/
+
+  # ── Stage 3 ────────────────────────────────────────────────────────────────
+  # Build and publish only proceeds once both test and typecheck have passed.
+  # On pull requests the image is built but not pushed or signed, providing
+  # a Dockerfile validity check without publishing unreviewed code.
+  # On scheduled runs the image is rebuilt and pushed to pick up base image
+  # OS patches even when there are no code changes.
+
+  publish:
+    name: Build and publish
+    needs: [test, typecheck]
+    runs-on: ubuntu-latest
+    if: |
+      always() && (
+        github.event_name == 'schedule' ||
+        (needs.test.result == 'success' && needs.typecheck.result == 'success')
+      )
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # Required for cosign keyless signing
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Compute date-version tag
+        id: datever
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          BUILD_NUM=${{ github.run_number }}
+          echo "tag=${DATE}-${BUILD_NUM}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v4.1.0
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.datever.outputs.tag }},enable=${{ github.event_name != 'pull_request' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.event_name == 'schedule' }}
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=ref,event=branch
+            type=sha
+
+      - name: Build and push Docker image
+        id: build-and-push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Sign the published Docker image
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          echo "$TAGS" | tr ',' '\n' | xargs -I {} \
+            cosign sign --yes {}@${DIGEST}
