@@ -8,5 +8,6 @@ isort==7.0.0  # dev only
 mypy==1.19.1  # dev only
 pydantic-settings==2.11.0
 telnetlib3==2.0.8
+types-Authlib==1.1.0.20240311  # dev only
 upnpclient==1.0.3
 websockets==14.2
