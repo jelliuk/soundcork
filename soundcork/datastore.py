@@ -1,6 +1,7 @@
 import logging
 import xml.etree.ElementTree as ET
 from os import mkdir, path, remove, rmdir, walk
+from os.path import abspath
 from typing import Optional
 
 from soundcork.config import Settings
@@ -40,14 +41,21 @@ class DataStore:
     def initialize_data_directory(self) -> None:
         raise NotImplementedError
 
+    def _safe_join_under_data_dir(self, *parts: str) -> str:
+        base_dir = abspath(self.data_dir)
+        candidate = abspath(path.join(base_dir, *parts))
+        if path.commonpath([base_dir, candidate]) != base_dir:
+            raise ValueError("Invalid path outside datastore root")
+        return candidate
+
     def account_dir(self, account: str) -> str:
-        return path.join(self.data_dir, account)
+        return self._safe_join_under_data_dir(account)
 
     def account_devices_dir(self, account: str) -> str:
-        return path.join(self.data_dir, account, DEVICES_DIR)
+        return self._safe_join_under_data_dir(account, DEVICES_DIR)
 
     def account_device_dir(self, account: str, device: str) -> str:
-        return path.join(self.account_devices_dir(account), device)
+        return self._safe_join_under_data_dir(account, DEVICES_DIR, device)
 
     def get_device_info(self, account: str, device: str) -> DeviceInfo:
         """Get the device info"""
