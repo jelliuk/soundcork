@@ -410,7 +410,7 @@ async def proxy_image(url: str):
     if not _is_allowed_image_url(url):
         return JSONResponse({"detail": "Forbidden: URL domain not allowed"}, status_code=403)
     try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
+        async with httpx.AsyncClient(follow_redirects=False) as client:
             resp = await client.get(url, timeout=SPEAKER_TIMEOUT)
         if resp.status_code >= 400:
             # Upstream refused — return transparent pixel so <img> doesn't break
