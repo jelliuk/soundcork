@@ -10,7 +10,7 @@ docker run -d --name soundcork \
   -v /path/to/your/data:/soundcork/data \
   -e base_url=http://your-server:8000 \
   -e data_dir=/soundcork/data \
-  ghcr.io/timvw/soundcork:main
+  ghcr.io/jelliuk/soundcork:latest
 ```
 
 ## Option 2: Docker Compose
@@ -20,7 +20,7 @@ Create a `docker-compose.yml`:
 ```yaml
 services:
   soundcork:
-    image: ghcr.io/timvw/soundcork:main
+    image: ghcr.io/jelliuk/soundcork:latest
     ports:
       - "8000:8000"
     environment:
@@ -28,6 +28,8 @@ services:
       - data_dir=/soundcork/data
       - SOUNDCORK_MODE=local
       - SOUNDCORK_LOG_DIR=/soundcork/logs/traffic
+      - MGMT_USERNAME=admin
+      - MGMT_PASSWORD=change_me!
       # Optional: OIDC/SSO authentication (see Authentication section below)
       # - OIDC_ISSUER_URL=https://your-provider/application/o/soundcork/
       # - OIDC_CLIENT_ID=soundcork
@@ -61,7 +63,7 @@ docker compose up -d
 |----------|---------|-------------|
 | `MGMT_USERNAME` | `admin` | Username for password-based WebUI and management API login |
 | `MGMT_PASSWORD` | `change_me!` | Password for password-based WebUI and management API login |
-| `OIDC_ISSUER_URL` | `""` | OIDC provider issuer URL (e.g., `https://authentik.example.com/application/o/soundcork/`) |
+| `OIDC_ISSUER_URL` | `""` | OIDC provider issuer URL (e.g. `https://tinyauth.example.com`)|
 | `OIDC_CLIENT_ID` | `""` | OIDC client ID |
 | `OIDC_CLIENT_SECRET` | `""` | OIDC client secret |
 
@@ -88,7 +90,7 @@ SoundCork has three layers of authentication:
 
 SoundCork supports authentication via any standard OpenID Connect provider. It uses the authorization code flow with PKCE and auto-discovers endpoints from the provider's `.well-known/openid-configuration`.
 
-**Tested providers:** Authentik, Keycloak. Any OIDC-compliant provider should work.
+**Tested providers:** [TinyAuth.](https://github.com/steveiliop56/tinyauth) Any OIDC-compliant provider should work.
 
 **Steps:**
 
@@ -100,7 +102,7 @@ SoundCork supports authentication via any standard OpenID Connect provider. It u
 
 2. Set the three environment variables:
    ```bash
-   OIDC_ISSUER_URL=https://your-provider/application/o/soundcork/
+   OIDC_ISSUER_URL=https://tinyauth.example.com
    OIDC_CLIENT_ID=soundcork
    OIDC_CLIENT_SECRET=your-client-secret
    ```
@@ -115,10 +117,10 @@ SoundCork supports authentication via any standard OpenID Connect provider. It u
 
 ## Container Image
 
-- **Image:** `ghcr.io/timvw/soundcork:main`
-- **Multi-architecture:** `linux/amd64` + `linux/arm64` (works on Raspberry Pi)
+- **Image:** `ghcr.io/jelliuk/soundcork:latest`
+- **Multi-architecture:** `linux/amd64`
 - Built automatically via GitHub Actions on every push to main
-- Source: see `.github/workflows/docker-publish.yml`
+- Source: see `.github/workflows/ci.yml`
 
 ## Verifying It Works
 
