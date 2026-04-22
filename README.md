@@ -1,16 +1,16 @@
-# SoundCork
+# SoundCork 🎧
+> **Goal:** Keep your Bose SoundTouch speaker fully functional after Bose shuts down their cloud servers on May 6, 2026.
 
-Keep your Bose SoundTouch speaker fully functional after Bose shuts down the SoundTouch cloud servers on May 6, 2026.
+SoundCork is a self-hosted replacement that emulates the four critical Bose cloud services locally. This means all control and streaming responses happen entirely within your network—no traffic to Bose, no risk of unwanted firmware updates, and complete data privacy.
 
-SoundCork is a self-hosted replacement for the four Bose cloud servers that SoundTouch speakers depend on. It serves all responses locally — no traffic to Bose, no risk of unwanted firmware updates, no data leaving your network.
+Fork of [https://github.com/deborahgu/soundcork](https://github.com/timvw/soundcork) and original works of [deborahgu/soundcork](https://github.com/deborahgu/soundcork)
 
-Fork of [deborahgu/soundcork](https://github.com/deborahgu/soundcork) with added Docker support, smart proxy mode, and deployment guides.
+## Service status
 
-### Service status
+[deborahgu/soundcork](https://github.com/deborahgu/soundcork) kindly maintains a forum post with the [Current Status of Bose Cloud Services](https://github.com/deborahgu/soundcork/discussions/181).
 
-We'll maintain a forum post with the [Current Status of Bose Cloud Services](https://github.com/deborahgu/soundcork/discussions/181). Check there for updates. We will update whenever we learn new information.
-
-## What Works
+---
+## 👍 What Works
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -24,7 +24,8 @@ We'll maintain a forum post with the [Current Status of Bose Cloud Services](htt
 | Firmware updates | Blocked | SoundCork returns "no updates available" |
 | SoundTouch app presets | Working | Configure TuneIn presets via the Web UI or [Bose CLI](https://github.com/timvw/bose) |
 
-## Screenshots
+---
+## 👓 Screenshots
 
 | Login (SSO) | Dashboard |
 |:-----------:|:---------:|
@@ -46,15 +47,27 @@ We'll maintain a forum post with the [Current Status of Bose Cloud Services](htt
 |:---------------------:|:----------------:|
 | ![Radio Preset](docs/screenshots/edit-radio-preset.png) | ![Spotify](docs/screenshots/spotify.png) |
 
-## Quick Start
+---
+## ⚙️ Prerequisites
 
+Before deploying SoundCork, you must prepare your speaker and data. Follow these steps in order:
+
+1. **Enable SSH Access**: Get SSH access to your speaker via [Speaker Setup Guide](docs/speaker-setup.md#step-1-enable-ssh-access)
+2. **Extract Speaker Data:** Extract necessary configuration files (presets, sources) from the speaker using [Speaker Setup Guide](docs/speaker-setup.md#step-2-extract-speaker-data)
+3. **Deploy SoundCork:** Deploy the service on your network using [Deployment Guide](docs/deployment.md)
+4. **Redirect Speaker:** Point your Bose device to your new local server via [Speaker Setup Guide](docs/speaker-setup.md#step-3-redirect-speaker-to-soundcork)
+
+---
+## 🚀 Quick Start Guide (Docker)
+
+If you have Docker installed, this is the fastest way to get running:
 ```bash
 docker run -d --name soundcork \
   -p 8000:8000 \
   -v ./data:/soundcork/data \
   -e base_url=http://your-server:8000 \
   -e data_dir=/soundcork/data \
-  ghcr.io/timvw/soundcork:main
+  ghcr.io/jelliuk/soundcork:latest
 ```
 
 Verify it's running:
@@ -63,20 +76,14 @@ curl http://your-server:8000/
 # {"Bose":"Can't Brick Us"}
 ```
 
-Then open `http://your-server:8000/webui/` to access the Web UI.
+Access the Web UI at `http://your-server:8000/webui/`.
 
 The container image supports `linux/amd64`.
 
-See [Deployment Guide](docs/deployment.md) for Docker Compose, Kubernetes, and bare metal options.
+See [Deployment Guide](docs/deployment.md) for Docker Compose.
 
-## Setup
-
-1. **Get SSH access** to your speaker — [Speaker Setup Guide](docs/speaker-setup.md#step-1-enable-ssh-access)
-2. **Extract your speaker data** (presets, sources, device info) — [Speaker Setup Guide](docs/speaker-setup.md#step-2-extract-speaker-data)
-3. **Deploy SoundCork** on your network — [Deployment Guide](docs/deployment.md)
-4. **Redirect your speaker** to SoundCork — [Speaker Setup Guide](docs/speaker-setup.md#step-3-redirect-speaker-to-soundcork)
-
-## Authentication
+---
+## 🔓 Authentication
 
 The Web UI is protected by session-based authentication. By default it uses a username/password login (configured via `MGMT_USERNAME`/`MGMT_PASSWORD`).
 
@@ -91,18 +98,20 @@ docker run -d --name soundcork \
   -e OIDC_ISSUER_URL=https://your-provider/application/o/soundcork/ \
   -e OIDC_CLIENT_ID=soundcork \
   -e OIDC_CLIENT_SECRET=your-secret \
-  ghcr.io/timvw/soundcork:main
+  ghcr.io/jelliuk/soundcork:latest
 ```
 
 When OIDC is configured, the login page shows a "Sign in with SSO" button. When it's not configured, the password form is shown. See [Deployment Guide](docs/deployment.md#authentication) for details.
 
-## How It Works
+---
+## ❓ How It Works
 
 SoundTouch speakers communicate with four Bose cloud servers. SoundCork replaces all of them by editing the speaker's configuration to point to your server instead.
 
 See [Architecture](docs/architecture.md) for details on the Bose servers, operating modes, and data flows.
 
-## Bose CLI
+---
+## 💻 Bose CLI
 
 The [Bose CLI](https://github.com/timvw/bose) talks directly to the speaker's local API (port 8090) and works independently of any cloud server:
 
@@ -113,7 +122,8 @@ bose status    # speaker status
 bose volume 30 # set volume
 ```
 
-## Documentation
+---
+## 📰 Documentation
 
 - [Speaker Setup Guide](docs/speaker-setup.md) — SSH access, data extraction, speaker redirect
 - [Deployment Guide](docs/deployment.md) — Docker, Docker Compose, Kubernetes, bare metal
@@ -122,11 +132,14 @@ bose volume 30 # set volume
 - [API Specification](docs/API_Spec.md) — Reverse-engineered Bose server API
 - [Shutdown Emulation](docs/Shutdown_Emulation.md) — Test results without Bose servers
 
-## Credits
+---
+## ⭐ Credits
 
 - [deborahgu](https://github.com/deborahgu) for creating the original [soundcork](https://github.com/deborahgu/soundcork) project
-- Bose for publishing the [SoundTouch Web API documentation](https://assets.bosecreative.com/m/496577402d128874/original/SoundTouch-Web-API.pdf) to support community developers
+- [timvw/soundcork](https://github.com/timvw) for the initial Docker support, smart proxy mode, and deployment guides.
+- Bose for publishing the [SoundTouch Web API documentation](https://assets.bosecreative.com/m/496577402d128874/original/SoundTouch-Web-API.pdf) to support community developers.
 
-## License
+---
+## ❗License
 
 MIT — see [LICENSE](LICENSE)
