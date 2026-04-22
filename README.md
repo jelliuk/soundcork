@@ -65,7 +65,7 @@ curl http://your-server:8000/
 
 Then open `http://your-server:8000/webui/` to access the Web UI.
 
-The container image supports `linux/amd64` and `linux/arm64` (Raspberry Pi).
+The container image supports `linux/amd64`.
 
 See [Deployment Guide](docs/deployment.md) for Docker Compose, Kubernetes, and bare metal options.
 
