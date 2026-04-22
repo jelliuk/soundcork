@@ -1,6 +1,6 @@
 import logging
 import xml.etree.ElementTree as ET
-from os import mkdir, path, remove, rmdir, sep, walk
+from os import mkdir, path, remove, rmdir, walk
 from typing import Optional
 
 from soundcork.config import Settings
