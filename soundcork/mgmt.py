@@ -259,7 +259,7 @@ async def activate_speaker(
     try:
         result = await spotify.activate_speaker(device_name_hint=device_name)
         return result
-    except Exception:
+    except Exception as e:
         logger.exception("Failed to activate speaker")
         raise HTTPException(status_code=503, detail=str(e))
 
@@ -283,6 +283,6 @@ async def spotify_entity(
     try:
         entity = await spotify.resolve_entity(uri)
         return entity
-    except Exception:
+    except Exception as e:
         logger.exception("Failed to resolve Spotify entity: %s", uri)
         raise HTTPException(status_code=500, detail=str(e))
