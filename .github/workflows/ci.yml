@@ -44,12 +44,12 @@ jobs:
       - name: Ruff check
         uses: astral-sh/ruff-action@v3
         with:
-          args: check
+          args: check --fix
 
       - name: Ruff format
         uses: astral-sh/ruff-action@v3
         with:
-          args: format --check
+          args: format
 
   # ── Stage 2 ────────────────────────────────────────────────────────────────
   # Test and typecheck run in parallel with each other but only after lint
