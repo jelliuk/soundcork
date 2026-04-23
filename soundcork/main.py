@@ -914,9 +914,12 @@ def bmx_orion_playback(data: str) -> BmxPlaybackResponse:
 
 @app.get("/media/{filename}", tags=["bmx"])
 def bmx_media_file(filename: str) -> FileResponse:
-    sanitized_filename = "".join(x for x in filename if x.isalnum() or x == "." or x == "-" or x == "_")
+    # Only allow direct filenames (no directory components)
+    if filename != os.path.basename(filename) or filename in {"", ".", ".."}:
+        raise HTTPException(status_code=404, detail="not found")
+
     media_root = os.path.realpath("media")
-    file_path = os.path.realpath(os.path.join(media_root, sanitized_filename))
+    file_path = os.path.realpath(os.path.join(media_root, filename))
 
     if os.path.commonpath([media_root, file_path]) != media_root:
         raise HTTPException(status_code=404, detail="not found")
