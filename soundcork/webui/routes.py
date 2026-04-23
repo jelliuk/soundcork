@@ -423,13 +423,26 @@ _TRANSPARENT_1X1 = (
 @router.get("/api/image")
 async def proxy_image(url: str):
     """Proxy an external image URL so the browser never fetches it directly."""
-    if not url.startswith(("http://", "https://")):
+    parsed = urlparse(url)
+
+    if parsed.scheme not in ("http", "https"):
         return Response(content="Invalid URL", status_code=400)
+
+    # Reject ambiguous URL forms that can bypass host-based allowlisting.
+    if not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+        return Response(content="Invalid URL", status_code=400)
+
     if not _is_allowed_image_url(url):
         return JSONResponse({"detail": "Forbidden: URL domain not allowed"}, status_code=403)
+
+    safe_path = parsed.path or "/"
+    safe_url = f"{parsed.scheme}://{parsed.netloc}{safe_path}"
+    if parsed.query:
+        safe_url = f"{safe_url}?{parsed.query}"
+
     try:
         async with httpx.AsyncClient(follow_redirects=False) as client:
-            resp = await client.get(url, timeout=SPEAKER_TIMEOUT)
+            resp = await client.get(safe_url, timeout=SPEAKER_TIMEOUT)
         if resp.status_code >= 400:
             # Upstream refused — return transparent pixel so <img> doesn't break
             return Response(

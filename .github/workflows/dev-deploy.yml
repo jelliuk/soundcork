@@ -1,0 +1,260 @@
+name: Dev deploy
+
+# Manually triggered only — never runs automatically.
+# Builds and publishes a dev-prefixed image from the dev branch,
+# then runs a Trivy scan against it before it can be promoted to main.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm you want to build and push a dev image'
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+
+  # ── Guard ──────────────────────────────────────────────────────────────────
+  # Rejects the run immediately if the confirmation input is wrong.
+  # Prevents accidental triggers from the GitHub UI without a deliberate
+  # acknowledgement that an image will be pushed to the registry.
+
+  confirm:
+    name: Confirm deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation input
+        if: inputs.confirm != 'deploy'
+        run: |
+          echo "Confirmation input was '${{ inputs.confirm }}', expected 'deploy'."
+          echo "Re-run the workflow and type 'deploy' in the confirmation field."
+          exit 1
+
+  # ── Stage 1 ────────────────────────────────────────────────────────────────
+  # Lint, test, and typecheck run against the dev branch before any image
+  # is built or pushed. A dev image should meet the same quality bar as a
+  # production image — failures here abort the deploy.
+
+  lint:
+    name: Lint
+    needs: confirm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: dev
+
+      - name: Ruff check
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: check
+
+      - name: Ruff format
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: format --check
+
+  # ── Stage 2 ────────────────────────────────────────────────────────────────
+
+  test:
+    name: Test
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: dev
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ \
+            --cov=soundcork \
+            --cov-report=term-missing \
+            --cov-report=xml
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v5
+        if: always()
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+
+  typecheck:
+    name: Type check
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: dev
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install mypy
+
+      - name: Run mypy
+        run: mypy soundcork/
+
+  # ── Stage 3 ────────────────────────────────────────────────────────────────
+  # Builds and pushes the dev image only after stages 1 and 2 pass.
+  # Tags follow the same date-version schema as production but are
+  # prefixed with "dev-" to clearly distinguish them in the registry.
+  # The image is also signed so the provenance chain is maintained.
+
+  publish:
+    name: Build and publish dev image
+    needs: [test, typecheck]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      # Pass the digest to the scan job so it scans the exact pushed image
+      digest: ${{ steps.build-and-push.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: dev
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Compute dev date-version tag
+        id: datever
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          BUILD_NUM=${{ github.run_number }}
+          echo "tag=dev-${DATE}-${BUILD_NUM}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Primary dev date-version tag: dev-YYYY-MM-DD-N
+            type=raw,value=${{ steps.datever.outputs.tag }}
+            # Branch tag: dev (overwritten on each deploy, useful for quick testing)
+            type=raw,value=dev
+            # Short SHA for precise traceability
+            type=sha,prefix=dev-
+
+      - name: Build and push dev image
+        id: build-and-push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Sign the dev image
+        env:
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          echo "$TAGS" | tr ',' '\n' | xargs -I {} \
+            cosign sign --yes {}@${DIGEST}
+
+  # ── Stage 4 ────────────────────────────────────────────────────────────────
+  # Trivy scans the exact image digest that was pushed in stage 3.
+  # Scanning by digest rather than tag guarantees the scan targets the image
+  # that was just built, not a previously pushed image that shares the tag.
+  # Uses the same exceptions as security.yml — unfixed CVEs are suppressed
+  # since base image OS packages cannot be resolved at this level.
+  # The workflow fails here if CRITICAL or HIGH fixable CVEs are found,
+  # acting as a gate before the image is used for testing.
+
+  scan:
+    name: Trivy scan dev image
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: dev
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          # Scan by digest so we're guaranteed to scan the image just built
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.publish.outputs.digest }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          # Ignore CVEs with no available fix — these are typically base image
+          # OS packages where no upstream patch exists yet and cannot be
+          # resolved without changing the base image itself.
+          ignore-unfixed: true
+          # Limit to known vulnerability types — excludes misconfiguration
+          # and secret scanning noise which are covered by other jobs.
+          vuln-type: os,library
+
+      - name: Upload Trivy results to Security tab
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+          # Separate category so dev scan results don't overwrite
+          # the main branch scan results in the Security tab
+          category: dev-container-scan
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "## Dev deploy complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** dev" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags pushed:**" >> $GITHUB_STEP_SUMMARY
+          echo '${{ needs.publish.outputs.tags }}' | tr ',' '\n' | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Digest:** \`${{ needs.publish.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Trivy scan passed. Image is ready for testing." >> $GITHUB_STEP_SUMMARY

@@ -330,6 +330,22 @@ class DataStore:
     def account_exists(self, account: str) -> bool:
         return account in self.list_accounts()
 
+    def _safe_child_path(self, base_dir: str, child_name: str) -> str:
+        # Only allow a single directory/file name component.
+        if (
+            not child_name
+            or path.isabs(child_name)
+            or child_name in (".", "..")
+            or path.basename(child_name) != child_name
+        ):
+            raise ValueError(f"Unsafe path component: {child_name}")
+
+        base_real = path.realpath(base_dir)
+        target_real = path.realpath(path.join(base_real, child_name))
+        if path.commonpath([base_real, target_real]) != base_real:
+            raise ValueError(f"Unsafe path component: {child_name}")
+        return target_real
+
     def device_exists(self, account: str, device_id: str) -> bool:
         return device_id in self.list_devices(account)
 
@@ -348,12 +364,14 @@ class DataStore:
         if self.device_exists(account, device_id):
             return False
 
+        device_dir = self._safe_child_path(self.account_devices_dir(account), device_id)
+
         # TODO: add error handling if you can't make the directory
-        mkdir(path.join(self.account_devices_dir(account), device_id))
+        mkdir(device_dir)
 
         # TODO: add error handling if you can't write the file
         with open(
-            path.join(self.account_device_dir(account, device_id), DEVICE_INFO_FILE),
+            path.join(device_dir, DEVICE_INFO_FILE),
             "w",
         ) as device_info_file:
             device_info_file.write(device_info_xml)
@@ -365,7 +383,10 @@ class DataStore:
         if not self.device_exists(account, device_id):
             return False
 
+        device_dir = self._safe_child_path(self.account_devices_dir(account), device_id)
+        device_info_path = self._safe_child_path(device_dir, DEVICE_INFO_FILE)
+
         # TODO: add error handling if you can't delete the files
-        remove(path.join(self.account_device_dir(account, device_id), DEVICE_INFO_FILE))
-        rmdir(path.join(self.account_devices_dir(account), device_id))
+        remove(device_info_path)
+        rmdir(device_dir)
         return True
