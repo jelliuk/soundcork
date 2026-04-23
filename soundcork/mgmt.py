@@ -167,10 +167,10 @@ async def spotify_callback(
             f"<p>You can close this window.</p>"
             f"</body></html>"
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Spotify callback failed")
         return HTMLResponse(
-            content=f"<html><body><h1>Error</h1><p>{e}</p></body></html>",
+            content="<html><body><h1>Error</h1><p>An internal error occurred. Please try again.</p></body></html>",
             status_code=500,
         )
 
@@ -193,9 +193,9 @@ async def spotify_confirm(
 
     try:
         await spotify.exchange_code_and_store(code)
-    except Exception as e:
+    except Exception:
         logger.exception("Spotify confirm failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     return {"ok": True}
 
