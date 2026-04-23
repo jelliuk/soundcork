@@ -384,8 +384,9 @@ class DataStore:
             return False
 
         device_dir = self._safe_child_path(self.account_devices_dir(account), device_id)
+        device_info_path = self._safe_child_path(device_dir, DEVICE_INFO_FILE)
 
         # TODO: add error handling if you can't delete the files
-        remove(path.join(device_dir, DEVICE_INFO_FILE))
+        remove(device_info_path)
         rmdir(device_dir)
         return True
