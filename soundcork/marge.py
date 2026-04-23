@@ -1,7 +1,7 @@
 import logging
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
-import xml.etree.ElementTree as ET
 
 import defusedxml.ElementTree as defused_ET
 from fastapi import HTTPException
