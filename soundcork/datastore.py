@@ -331,6 +331,15 @@ class DataStore:
         return account in self.list_accounts()
 
     def _safe_child_path(self, base_dir: str, child_name: str) -> str:
+        # Only allow a single directory/file name component.
+        if (
+            not child_name
+            or path.isabs(child_name)
+            or child_name in (".", "..")
+            or path.basename(child_name) != child_name
+        ):
+            raise ValueError(f"Unsafe path component: {child_name}")
+
         base_real = path.realpath(base_dir)
         target_real = path.realpath(path.join(base_real, child_name))
         if path.commonpath([base_real, target_real]) != base_real:
