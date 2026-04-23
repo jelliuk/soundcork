@@ -1,8 +1,9 @@
 import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
+import xml.etree.ElementTree as ET
 
-import defusedxml.ElementTree as ET
+import defusedxml.ElementTree as defused_ET
 from fastapi import HTTPException
 
 from soundcork.config import Settings
@@ -95,7 +96,7 @@ def update_preset(
     conf_sources_list = datastore.get_configured_sources(account, device)
     presets_list = datastore.get_presets(account, device)
 
-    new_preset_elem = ET.fromstring(source_xml)
+    new_preset_elem = defused_ET.fromstring(source_xml)
 
     # load the preset to add
 
@@ -233,7 +234,7 @@ def add_recent(datastore: "DataStore", account: str, device: str, source_xml: by
     conf_sources_list = datastore.get_configured_sources(account, device)
     recents_list = datastore.get_recents(account, device)
 
-    new_recent_elem = ET.fromstring(source_xml)
+    new_recent_elem = defused_ET.fromstring(source_xml)
 
     # load the recent to add
     device_id = device
@@ -438,7 +439,7 @@ def software_update_xml() -> ET.Element:
 
 def add_device_to_account(datastore: "DataStore", account: str, source_xml: str) -> tuple[str, ET.Element]:
 
-    new_device_elem = ET.fromstring(source_xml)
+    new_device_elem = defused_ET.fromstring(source_xml)
     device_id = new_device_elem.attrib.get("deviceid", "")
     # Name is required and should raise an exception if missing
     name = new_device_elem.find("name").text  # type:ignore
