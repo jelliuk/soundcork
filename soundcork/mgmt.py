@@ -171,7 +171,7 @@ async def spotify_callback(
             f"<p>You can close this window.</p>"
             f"</body></html>"
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Spotify callback failed")
         return HTMLResponse(
             content="<html><body><h1>Error</h1><p>An internal error has occurred.</p></body></html>",
@@ -197,7 +197,7 @@ async def spotify_confirm(
 
     try:
         await spotify.exchange_code_and_store(code)
-    except Exception as e:
+    except Exception:
         logger.exception("Spotify confirm failed")
         raise HTTPException(status_code=500, detail="An internal error has occurred")
 
@@ -259,7 +259,7 @@ async def activate_speaker(
     try:
         result = await spotify.activate_speaker(device_name_hint=device_name)
         return result
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to activate speaker")
         raise HTTPException(status_code=503, detail=str(e))
 
@@ -283,6 +283,6 @@ async def spotify_entity(
     try:
         entity = await spotify.resolve_entity(uri)
         return entity
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to resolve Spotify entity: %s", uri)
         raise HTTPException(status_code=500, detail=str(e))
