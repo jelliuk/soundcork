@@ -1,11 +1,16 @@
-# SoundCork 🎧
+# SoundCork 🔊 
 > **Goal:** Keep your Bose SoundTouch speaker fully functional after Bose shuts down their cloud servers on May 6, 2026.
 
 SoundCork is a self-hosted replacement that emulates the four critical Bose cloud services locally. This means all control and streaming responses happen entirely within your network—no traffic to Bose, no risk of unwanted firmware updates, and complete data privacy.
 
-Fork of [https://github.com/deborahgu/soundcork](https://github.com/timvw/soundcork) and original works of [deborahgu/soundcork](https://github.com/deborahgu/soundcork)
+Credits: [Thanks To](https://github.com/jelliuk/soundcork#-credits)
 
-## Service status
+## 🔨 Deployment Status
+[![Development Build](https://github.com/jelliuk/soundcork/actions/workflows/dev-deploy.yml/badge.svg)](https://github.com/jelliuk/soundcork/actions/workflows/dev-deploy.yml)
+[![Main Build](https://github.com/jelliuk/soundcork/actions/workflows/ci.yml/badge.svg)](https://github.com/jelliuk/soundcork/actions/workflows/ci.yml)
+[![Security](https://github.com/jelliuk/soundcork/actions/workflows/security.yml/badge.svg)](https://github.com/jelliuk/soundcork/actions/workflows/security.yml)
+
+## 📌 Service status
 
 [deborahgu/soundcork](https://github.com/deborahgu/soundcork) kindly maintains a forum post with the [Current Status of Bose Cloud Services](https://github.com/deborahgu/soundcork/discussions/181).
 
