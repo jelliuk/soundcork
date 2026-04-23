@@ -174,7 +174,7 @@ async def spotify_callback(
     except Exception:
         logger.exception("Spotify callback failed")
         return HTMLResponse(
-            content="<html><body><h1>Error</h1><p>An internal error has occurred.</p></body></html>",
+            content="<html><body><h1>Error</h1><p>An internal error occurred. Please try again.</p></body></html>",
             status_code=500,
         )
 
