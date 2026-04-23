@@ -462,5 +462,11 @@ def add_device_to_account(datastore: "DataStore", account: str, source_xml: str)
 
 
 def remove_device_from_account(datastore: "DataStore", account: str, device: str):
+    try:
+        # Validate untrusted device path component before any filesystem operation.
+        datastore._safe_child_path(datastore.account_devices_dir(account), device)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid device id") from exc
+
     removed = datastore.remove_device(account, device)
     return {"ok": removed}
