@@ -936,7 +936,7 @@ def sw_update() -> Response:
     swupdate_path = os.path.realpath(
         os.path.join(os.path.dirname(__file__), "swupdate.xml")
     )
-    with open(swupdate_path, "r") as file:
+    with open(swupdate_path) as file:
         sw_update_response = file.read()
         response = Response(content=sw_update_response, media_type="application/xml")
         return response
