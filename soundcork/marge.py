@@ -1,8 +1,8 @@
 import logging
-import defusedxml.ElementTree as ET
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+import defusedxml.ElementTree as ET
 from fastapi import HTTPException
 
 from soundcork.config import Settings
