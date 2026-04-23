@@ -933,7 +933,10 @@ def bmx_media_file(filename: str) -> FileResponse:
 @app.get("/updates/soundtouch", tags=["swupdate"])
 @app.get("/marge/updates/soundtouch", tags=["swupdate"])
 def sw_update() -> Response:
-    with open("swupdate.xml", "r") as file:
+    swupdate_path = os.path.realpath(
+        os.path.join(os.path.dirname(__file__), "swupdate.xml")
+    )
+    with open(swupdate_path, "r") as file:
         sw_update_response = file.read()
         response = Response(content=sw_update_response, media_type="application/xml")
         return response
