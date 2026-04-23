@@ -60,7 +60,26 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Scan image with Trivy
+      # Table scan — output visible in the job log and written to a file
+      # for the summary step. exit-code 0 so this step never fails on its
+      # own; the SARIF step below is the authoritative gate.
+      - name: Scan image with Trivy (table)
+        id: trivy-table
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: soundcork:scan
+          format: table
+          output: trivy-results.txt
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: os,library
+          scanners: vuln
+ 
+      # SARIF scan — authoritative gate that fails the job if fixable
+      # CRITICAL or HIGH CVEs are found. Results uploaded to Security tab.
+      - name: Scan image with Trivy (SARIF)
+        id: trivy-sarif
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: soundcork:scan
@@ -68,19 +87,45 @@ jobs:
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
           exit-code: '1'
-          # Ignore CVEs with no available fix — these are typically base image
-          # OS packages where no upstream patch exists yet and cannot be
-          # resolved without changing the base image itself.
           ignore-unfixed: true
-          # Limit to known vulnerability types — excludes misconfiguration
-          # and secret scanning noise which are covered by other jobs.
           vuln-type: os,library
           scanners: vuln
-
+ 
       - name: Upload Trivy results to Security tab
         uses: github/codeql-action/upload-sarif@v4
-        # Run even if Trivy found vulnerabilities so results always appear
-        # in the Security tab regardless of exit code.
         if: always()
         with:
           sarif_file: trivy-results.sarif
+ 
+      # Write a job summary modelled on the pip-audit output format.
+      # Reads the table output file produced by the first scan step.
+      # Runs whether the SARIF step passed or failed so the summary is
+      # always populated regardless of outcome.
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## Trivy container scan summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+ 
+          if [ "${{ steps.trivy-sarif.outcome }}" = "success" ]; then
+            echo "🎉 Trivy exited successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Trivy found vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          fi
+ 
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan settings:** CRITICAL,HIGH · ignore-unfixed · os,library only" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<details><summary>Raw Trivy output</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+ 
+          if [ -s trivy-results.txt ]; then
+            cat trivy-results.txt >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No known vulnerabilities found" >> $GITHUB_STEP_SUMMARY
+          fi
+ 
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
