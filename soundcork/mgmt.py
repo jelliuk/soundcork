@@ -7,6 +7,7 @@ device events, and Spotify integration.
 All endpoints require HTTP Basic Auth.
 """
 
+import html
 import logging
 from typing import Annotated
 
@@ -145,8 +146,9 @@ async def spotify_callback(
     that the user can close.
     """
     if error:
+        safe_error = html.escape(error)
         return HTMLResponse(
-            content=f"<html><body><h1>Spotify Authorization Failed</h1><p>Error: {error}</p></body></html>",
+            content=f"<html><body><h1>Spotify Authorization Failed</h1><p>Error: {safe_error}</p></body></html>",
             status_code=400,
         )
 
@@ -160,17 +162,19 @@ async def spotify_callback(
         # The redirect_uri must match what was used in the authorize request
         callback_url = settings.base_url.rstrip("/") + "/mgmt/spotify/callback"
         account = await spotify.exchange_code_and_store(code, redirect_uri=callback_url)
+        safe_display_name = html.escape(str(account["displayName"]))
+        safe_spotify_user_id = html.escape(str(account["spotifyUserId"]))
         return HTMLResponse(
             content=f"<html><body>"
             f"<h1>Spotify Connected</h1>"
-            f"<p>Linked account: {account['displayName']} ({account['spotifyUserId']})</p>"
+            f"<p>Linked account: {safe_display_name} ({safe_spotify_user_id})</p>"
             f"<p>You can close this window.</p>"
             f"</body></html>"
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Spotify callback failed")
         return HTMLResponse(
-            content=f"<html><body><h1>Error</h1><p>{e}</p></body></html>",
+            content="<html><body><h1>Error</h1><p>An internal error has occurred.</p></body></html>",
             status_code=500,
         )
 
@@ -193,9 +197,9 @@ async def spotify_confirm(
 
     try:
         await spotify.exchange_code_and_store(code)
-    except Exception as e:
+    except Exception:
         logger.exception("Spotify confirm failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error has occurred")
 
     return {"ok": True}
 
