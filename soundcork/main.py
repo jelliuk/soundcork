@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import secrets as _secrets_mod
 import xml.etree.ElementTree as ET
 from contextlib import asynccontextmanager
@@ -20,6 +21,8 @@ from soundcork.bmx import (
 from soundcork.config import Settings
 from soundcork.constants import ACCOUNT_RE, DEVICE_RE
 from soundcork.datastore import DataStore
+
+MEDIA_FILENAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 from soundcork.devices import (
     add_device,
     get_bose_devices,
@@ -922,11 +925,15 @@ def bmx_orion_playback(data: str) -> BmxPlaybackResponse:
 
 @app.get("/media/{filename}", tags=["bmx"])
 def bmx_media_file(filename: str) -> FileResponse:
-    # Only allow direct filenames (no directory components)
-    if filename != os.path.basename(filename) or filename in {"", ".", ".."}:
+    # Only allow direct filenames with a safe character set.
+    if (
+        filename != os.path.basename(filename)
+        or filename in {"", ".", ".."}
+        or not MEDIA_FILENAME_RE.fullmatch(filename)
+    ):
         raise HTTPException(status_code=404, detail="not found")
 
-    media_root = os.path.realpath("media")
+    media_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "media"))
     file_path = os.path.realpath(os.path.join(media_root, filename))
 
     if os.path.commonpath([media_root, file_path]) != media_root:
