@@ -913,7 +913,12 @@ def bmx_orion_playback(data: str) -> BmxPlaybackResponse:
 
 
 @app.get("/media/{filename}", tags=["bmx"])
-def bmx_media_file(filename: str) -> FileResponse:
+def bmx_media_file(
+    filename: Annotated[
+        str,
+        Path(pattern=r"^[A-Za-z0-9._-]+$", min_length=1),
+    ],
+) -> FileResponse:
     # Only allow direct filenames (no directory components)
     if filename != os.path.basename(filename) or filename in {"", ".", ".."}:
         raise HTTPException(status_code=404, detail="not found")
