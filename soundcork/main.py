@@ -933,7 +933,7 @@ def bmx_media_file(filename: str) -> FileResponse:
     ):
         raise HTTPException(status_code=404, detail="not found")
 
-    media_root = os.path.realpath("media")
+    media_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "media"))
     file_path = os.path.realpath(os.path.join(media_root, filename))
 
     if os.path.commonpath([media_root, file_path]) != media_root:
