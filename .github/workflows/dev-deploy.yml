@@ -236,6 +236,7 @@ jobs:
           # Limit to known vulnerability types — excludes misconfiguration
           # and secret scanning noise which are covered by other jobs.
           vuln-type: os,library
+          scanners: vuln
 
       - name: Upload Trivy results to Security tab
         uses: github/codeql-action/upload-sarif@v4
