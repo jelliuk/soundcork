@@ -10,5 +10,6 @@ mypy==1.19.1  # dev only
 pydantic-settings==2.11.0
 telnetlib3==2.0.8
 types-Authlib==1.6.11.20260418  # dev only
+types-defusedxml==0.7.0.20260408  # dev only
 upnpclient==2.0.3
 websockets==14.2
