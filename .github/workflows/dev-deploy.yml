@@ -50,12 +50,12 @@ jobs:
       - name: Ruff check
         uses: astral-sh/ruff-action@v3
         with:
-          args: check --fix
+          args: check
 
       - name: Ruff format
         uses: astral-sh/ruff-action@v3
         with:
-          args: format
+          args: format --check
 
   # ── Stage 2 ────────────────────────────────────────────────────────────────
 
