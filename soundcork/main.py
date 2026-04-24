@@ -934,6 +934,7 @@ def bmx_media_file(filename: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="not found")
     return FileResponse(safe_path)
 
+
 @app.get("/updates/soundtouch", tags=["swupdate"])
 @app.get("/marge/updates/soundtouch", tags=["swupdate"])
 def sw_update() -> Response:
