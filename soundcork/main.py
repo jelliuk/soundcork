@@ -917,24 +917,22 @@ def bmx_orion_playback(data: str) -> BmxPlaybackResponse:
 
 @app.get("/media/{filename}", tags=["bmx"])
 def bmx_media_file(filename: str) -> FileResponse:
-    # Only allow direct filenames with a safe character set.
     if (
         filename != os.path.basename(filename)
         or filename in {"", ".", ".."}
         or not MEDIA_FILENAME_RE.fullmatch(filename)
     ):
         raise HTTPException(status_code=404, detail="not found")
-
     media_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "media"))
-    file_path = os.path.realpath(os.path.join(media_root, filename))
-
-    if os.path.commonpath([media_root, file_path]) != media_root:
+    media_files: dict[str, str] = {
+        entry: os.path.join(media_root, entry)
+        for entry in os.listdir(media_root)
+        if os.path.isfile(os.path.join(media_root, entry))
+    }
+    safe_path: str | None = media_files.get(filename)
+    if not safe_path:
         raise HTTPException(status_code=404, detail="not found")
-
-    if os.path.isfile(file_path):
-        return FileResponse(file_path)
-
-    raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(safe_path)
 
 
 @app.get("/updates/soundtouch", tags=["swupdate"])
