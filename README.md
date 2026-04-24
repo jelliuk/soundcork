@@ -7,7 +7,7 @@ Credits: [Thanks To](https://github.com/jelliuk/soundcork#-credits)
 
 ## 🔨 Deployment Status
 [![Development Build](https://github.com/jelliuk/soundcork/actions/workflows/dev-deploy.yml/badge.svg)](https://github.com/jelliuk/soundcork/actions/workflows/dev-deploy.yml)
-[![Main Build](https://github.com/jelliuk/soundcork/actions/workflows/ci.yml/badge.svg)](https://github.com/jelliuk/soundcork/actions/workflows/ci.yml)
+[![Production Build](https://github.com/jelliuk/soundcork/actions/workflows/prod-deploy.yml/badge.svg)](https://github.com/jelliuk/soundcork/actions/workflows/prod-deploy.yml)
 [![Security](https://github.com/jelliuk/soundcork/actions/workflows/security.yml/badge.svg)](https://github.com/jelliuk/soundcork/actions/workflows/security.yml)
 
 ## 📌 Service status
