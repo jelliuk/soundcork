@@ -1,0 +1,95 @@
+name: Ruff auto-fix
+
+# Manually triggered — run this when ruff format or ruff check
+# reports issues that need fixing. Creates a PR against the target
+# branch rather than committing directly.
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to fix and raise PR against'
+        required: true
+        default: 'dev'
+        type: string
+
+jobs:
+  autofix:
+    name: Apply ruff fixes and raise PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.branch }}
+          # Use a PAT or the default GITHUB_TOKEN — GITHUB_TOKEN cannot
+          # trigger further workflow runs on the resulting PR, which is
+          # intentional here to avoid loops.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install ruff
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: --version
+
+      - name: Run ruff check --fix
+        run: ruff check --fix .
+        continue-on-error: true
+
+      - name: Run ruff format
+        run: ruff format .
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Files changed:"
+            git diff --name-only
+          fi
+
+      - name: Commit and push to fix branch
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="fix/ruff-autofix-$(date -u +%Y%m%d-%H%M%S)"
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "fix: apply ruff check and format auto-fixes"
+          git push origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+        id: push
+
+      - name: Create pull request
+        if: steps.changes.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'fix: ruff auto-fix formatting and lint issues',
+              head: '${{ steps.push.outputs.branch }}',
+              base: '${{ inputs.branch }}',
+              body: [
+                '## Ruff auto-fix',
+                '',
+                'This PR was generated automatically by the **Ruff auto-fix** workflow.',
+                '',
+                'Changes applied:',
+                '- `ruff check --fix` — corrected fixable lint violations',
+                '- `ruff format` — reformatted files to match ruff style',
+                '',
+                'Review the diff before merging to ensure no unintended changes.',
+              ].join('\n'),
+            });
+            console.log(`PR created: ${pr.data.html_url}`);
+
+      - name: No changes needed
+        if: steps.changes.outputs.changed == 'false'
+        run: echo "No ruff fixes required — all files are already clean."
