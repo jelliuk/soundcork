@@ -164,11 +164,7 @@ async def log_unknown_requests(request: Request, call_next):
         if settings.log_request_headers:
             headers_str = (
                 " headers={"
-                + ", ".join(
-                    f"{k}: {v}"
-                    for k, v in request.headers.items()
-                    if k.lower() not in ("host",)
-                )
+                + ", ".join(f"{k}: {v}" for k, v in request.headers.items() if k.lower() not in ("host",))
                 + "}"
             )
         logger.info(
@@ -646,9 +642,7 @@ def streaming_token(device: str, request: Request):
 
 @app.get("/marge/streaming/sourceproviders", tags=["marge"])
 def streamingsourceproviders():
-    return_xml = (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sourceProviders>'
-    )
+    return_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sourceProviders>'
     for provider in source_providers():
         return_xml = (
             return_xml
@@ -860,9 +854,7 @@ async def delete_account_device(
 ):
     remove_device_from_account(datastore, account, device)
     response.headers["method_name"] = "removeDevice"
-    response.headers["location"] = (
-        f"{settings.base_url}/marge/account/{account}/device/{device}"
-    )
+    response.headers["location"] = f"{settings.base_url}/marge/account/{account}/device/{device}"
     response.body = b""
     response.status_code = HTTPStatus.OK
     return response
@@ -873,9 +865,9 @@ def bmx_services() -> BmxResponse:
 
     with open("bmx_services.json", "r") as file:
         bmx_response_json = file.read()
-        bmx_response_json = bmx_response_json.replace(
-            "{MEDIA_SERVER}", f"{settings.base_url}/media"
-        ).replace("{BMX_SERVER}", settings.base_url)
+        bmx_response_json = bmx_response_json.replace("{MEDIA_SERVER}", f"{settings.base_url}/media").replace(
+            "{BMX_SERVER}", settings.base_url
+        )
         # TODO:  we're sending askAgainAfter hardcoded, but that value actually
         # varies.
         bmx_response = BmxResponse.model_validate_json(bmx_response_json)
@@ -948,9 +940,7 @@ def bmx_media_file(filename: str) -> FileResponse:
 @app.get("/updates/soundtouch", tags=["swupdate"])
 @app.get("/marge/updates/soundtouch", tags=["swupdate"])
 def sw_update() -> Response:
-    swupdate_path = os.path.realpath(
-        os.path.join(os.path.dirname(__file__), "swupdate.xml")
-    )
+    swupdate_path = os.path.realpath(os.path.join(os.path.dirname(__file__), "swupdate.xml"))
     with open(swupdate_path) as file:
         sw_update_response = file.read()
         response = Response(content=sw_update_response, media_type="application/xml")
@@ -977,9 +967,7 @@ def bose_xml_str(xml: ET.Element) -> str:
 ##############################################################################
 
 # --- BMX root-level aliases ---
-app.add_api_route(
-    "/registry/v1/services", bmx_services, methods=["GET"], tags=["bmx-alias"]
-)
+app.add_api_route("/registry/v1/services", bmx_services, methods=["GET"], tags=["bmx-alias"])
 app.add_api_route(
     "/tunein/v1/playback/station/{station_id}",
     bmx_playback,
@@ -1018,9 +1006,7 @@ app.add_api_route(
     methods=["GET"],
     tags=["marge-alias"],
 )
-app.add_api_route(
-    "/streaming/support/power_on", power_on, methods=["POST"], tags=["marge-alias"]
-)
+app.add_api_route("/streaming/support/power_on", power_on, methods=["POST"], tags=["marge-alias"])
 app.add_api_route(
     "/streaming/device/{device}/streaming_token",
     streaming_token,
@@ -1109,9 +1095,7 @@ app.add_api_route(
     methods=["GET"],
     tags=["marge-alias"],
 )
-app.add_api_route(
-    "/accounts/{account}/full", account_full, methods=["GET"], tags=["marge-alias"]
-)
+app.add_api_route("/accounts/{account}/full", account_full, methods=["GET"], tags=["marge-alias"])
 app.add_api_route(
     "/marge/accounts/{account}/devices/{device}/presets",
     account_presets,
