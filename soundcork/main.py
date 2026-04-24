@@ -924,15 +924,15 @@ def bmx_media_file(filename: str) -> FileResponse:
     ):
         raise HTTPException(status_code=404, detail="not found")
     media_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "media"))
-    file_path = os.path.realpath(os.path.join(media_root, filename))
-    if os.path.commonpath([media_root, file_path]) != media_root:
-        raise HTTPException(status_code=404, detail="not found")
-    safe_path: str = os.path.join(media_root, os.path.basename(filename))
-    if not os.path.isfile(safe_path):
+    media_files: dict[str, str] = {
+        entry: os.path.join(media_root, entry)
+        for entry in os.listdir(media_root)
+        if os.path.isfile(os.path.join(media_root, entry))
+    }
+    safe_path: str | None = media_files.get(filename)
+    if not safe_path:
         raise HTTPException(status_code=404, detail="not found")
     return FileResponse(safe_path)
-    raise HTTPException(status_code=404, detail="not found")
-
 
 @app.get("/updates/soundtouch", tags=["swupdate"])
 @app.get("/marge/updates/soundtouch", tags=["swupdate"])
