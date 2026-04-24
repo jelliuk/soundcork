@@ -1,4 +1,4 @@
-name: Dev deploy
+name: Development Build
 
 # Manually triggered only — never runs automatically.
 # Builds and publishes a dev-prefixed image from the dev branch,
@@ -18,10 +18,6 @@ env:
 jobs:
 
   # ── Guard ──────────────────────────────────────────────────────────────────
-  # Rejects the run immediately if the confirmation input is wrong.
-  # Prevents accidental triggers from the GitHub UI without a deliberate
-  # acknowledgement that an image will be pushed to the registry.
-
   confirm:
     name: Confirm deploy
     runs-on: ubuntu-latest
@@ -34,10 +30,6 @@ jobs:
           exit 1
 
   # ── Stage 1 ────────────────────────────────────────────────────────────────
-  # Lint, test, and typecheck run against the dev branch before any image
-  # is built or pushed. A dev image should meet the same quality bar as a
-  # production image — failures here abort the deploy.
-
   lint:
     name: Lint
     needs: confirm
@@ -50,15 +42,14 @@ jobs:
       - name: Ruff check
         uses: astral-sh/ruff-action@v3
         with:
-          args: check --fix
+          args: check
 
       - name: Ruff format
         uses: astral-sh/ruff-action@v3
         with:
-          args: format
+          args: format --check
 
   # ── Stage 2 ────────────────────────────────────────────────────────────────
-
   test:
     name: Test
     needs: lint
@@ -120,7 +111,6 @@ jobs:
   # Builds and pushes the dev image only after stages 1 and 2 pass.
   # Tags follow the same date-version schema as production but are
   # prefixed with "dev-" to clearly distinguish them in the registry.
-  # The image is also signed so the provenance chain is maintained.
 
   publish:
     name: Build and publish dev image
@@ -131,7 +121,6 @@ jobs:
       packages: write
       id-token: write
     outputs:
-      # Pass the digest to the scan job so it scans the exact pushed image
       digest: ${{ steps.build-and-push.outputs.digest }}
       tags: ${{ steps.meta.outputs.tags }}
 
@@ -166,11 +155,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            # Primary dev date-version tag: dev-YYYY-MM-DD-N
             type=raw,value=${{ steps.datever.outputs.tag }}
-            # Branch tag: dev (overwritten on each deploy, useful for quick testing)
             type=raw,value=dev
-            # Short SHA for precise traceability
             type=sha,prefix=dev-
 
       - name: Build and push dev image
@@ -194,13 +180,9 @@ jobs:
             cosign sign --yes {}@${DIGEST}
 
   # ── Stage 4 ────────────────────────────────────────────────────────────────
-  # Trivy scans the exact image digest that was pushed in stage 3.
-  # Scanning by digest rather than tag guarantees the scan targets the image
-  # that was just built, not a previously pushed image that shares the tag.
-  # Uses the same exceptions as security.yml — unfixed CVEs are suppressed
-  # since base image OS packages cannot be resolved at this level.
-  # The workflow fails here if CRITICAL or HIGH fixable CVEs are found,
-  # acting as a gate before the image is used for testing.
+  # Trivy scan using the same approach as security.yml — table scan drives
+  # the gate, SARIF is generated separately for the Security tab.
+  # Scanning by digest guarantees the exact image just built is scanned.
 
   scan:
     name: Trivy scan dev image
@@ -220,21 +202,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Scan image with Trivy
+      # Table scan — drives the gate via output file parsing.
+      # exit-code 0 avoids the SARIF all-severities false positive.
+      - name: Scan image with Trivy (table)
+        id: trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          # Scan by digest so we're guaranteed to scan the image just built
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.publish.outputs.digest }}
+          format: table
+          output: trivy-results.txt
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: os,library
+          scanners: vuln
+
+      # Parse table output — "Total:" only appears when findings exist.
+      - name: Check for vulnerabilities
+        id: check
+        run: |
+          if grep -q "Total:" trivy-results.txt 2>/dev/null; then
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+          fi
+
+      # SARIF for Security tab — exit-code 0, does not affect gate.
+      - name: Generate SARIF for Security tab
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.publish.outputs.digest }}
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
-          exit-code: '1'
-          # Ignore CVEs with no available fix — these are typically base image
-          # OS packages where no upstream patch exists yet and cannot be
-          # resolved without changing the base image itself.
+          exit-code: '0'
           ignore-unfixed: true
-          # Limit to known vulnerability types — excludes misconfiguration
-          # and secret scanning noise which are covered by other jobs.
           vuln-type: os,library
           scanners: vuln
 
@@ -243,19 +245,45 @@ jobs:
         if: always()
         with:
           sarif_file: trivy-results.sarif
-          # Separate category so dev scan results don't overwrite
-          # the main branch scan results in the Security tab
           category: dev-container-scan
 
-      - name: Summary
-        if: success()
+      - name: Write job summary
+        if: always()
         run: |
-          echo "## Dev deploy complete" >> $GITHUB_STEP_SUMMARY
+          echo "## Dev deploy — Trivy scan summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.check.outputs.result }}" = "pass" ]; then
+            echo "🎉 Trivy exited successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Trivy found vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          fi
+
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Branch:** dev" >> $GITHUB_STEP_SUMMARY
+          echo "**Digest:** \`${{ needs.publish.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Tags pushed:**" >> $GITHUB_STEP_SUMMARY
           echo '${{ needs.publish.outputs.tags }}' | tr ',' '\n' | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Digest:** \`${{ needs.publish.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan settings:** CRITICAL,HIGH · ignore-unfixed · os,library only" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Trivy scan passed. Image is ready for testing." >> $GITHUB_STEP_SUMMARY
+          echo "<details><summary>Raw Trivy output</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          if [ -s trivy-results.txt ]; then
+            cat trivy-results.txt >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No known vulnerabilities found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+      # Fail after summary is written so output is always visible.
+      - name: Fail if vulnerabilities found
+        if: steps.check.outputs.result == 'fail'
+        run: |
+          echo "Fixable CRITICAL or HIGH vulnerabilities were found. See summary above."
+          exit 1
