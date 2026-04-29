@@ -56,7 +56,7 @@ No password is required.
 By default, SSH access is lost when the speaker reboots. To make it permanent:
 
 ```sh
-ssh root@<speaker-ip>
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip>
 touch /mnt/nv/remote_services
 ```
 
@@ -200,7 +200,7 @@ ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> mount -o remount,rw /
 ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> 'mkdir -p /home/root/.ssh && chmod 700 /home/root/.ssh'
 
 # Upload your public key
-cat ~/.ssh/id_rsa.pub | ssh root@<speaker-ip> \
+cat ~/.ssh/id_rsa.pub | ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> \
     'cat > /home/root/.ssh/authorized_keys && chmod 600 /home/root/.ssh/authorized_keys'
 ```
 
@@ -326,7 +326,7 @@ Replace the URL and credentials with your SoundCork server details. The file is
 From your local machine, copy the script to the speaker:
 
 ```sh
-cat scripts/spotify-boot-primer | ssh root@<speaker-ip> \
+cat scripts/spotify-boot-primer | ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> \
     "mkdir -p /mnt/nv/bin && cat > /mnt/nv/bin/spotify-boot-primer && chmod +x /mnt/nv/bin/spotify-boot-primer"
 ```
 
@@ -354,7 +354,7 @@ ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> 'cat > /mnt/nv/rc.local' << 'E
 #!/bin/bash
 /mnt/nv/bin/spotify-boot-primer &
 EOF
-ssh root@<speaker-ip> chmod +x /mnt/nv/rc.local
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> chmod +x /mnt/nv/rc.local
 ```
 
 ### 4. Set up PATH for interactive SSH (optional)
