@@ -13,7 +13,6 @@ import logging
 from typing import Annotated
 
 import httpx
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
@@ -294,6 +293,7 @@ async def spotify_entity(
         logger.exception("Failed to resolve Spotify entity: %s", uri)
         raise HTTPException(status_code=500, detail=str(e))
 
+
 SPEAKER_PORT = 8090
 SPEAKER_TIMEOUT = 10.0
 
@@ -305,9 +305,9 @@ def _content_item_xml_from_preset(preset) -> str:
         f' location="{preset.location}"'
         f' sourceAccount="{preset.source_account or ""}"'
         f' isPresetable="true">'
-        f'<itemName>{preset.name}</itemName>'
-        f'<containerArt>{preset.container_art or ""}</containerArt>'
-        f'</ContentItem>'
+        f"<itemName>{preset.name}</itemName>"
+        f"<containerArt>{preset.container_art or ''}</containerArt>"
+        f"</ContentItem>"
     )
 
 
@@ -369,11 +369,16 @@ async def sync_presets_to_all_speakers(
     SPEAKER_PRESET_TMP = "/mnt/nv/BoseApp-Persistence/1/Presets.xml.tmp"
 
     SSH_OPTS = [
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "HostKeyAlgorithms=+ssh-rsa",
-        "-o", "PubkeyAuthentication=no",
-        "-o", "ConnectTimeout=10",
-        "-o", "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        "HostKeyAlgorithms=+ssh-rsa",
+        "-o",
+        "PubkeyAuthentication=no",
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "BatchMode=yes",
     ]
 
     # Single SSH session: remount rw, backup, write tmp, mv, remount ro
@@ -389,14 +394,15 @@ async def sync_presets_to_all_speakers(
     async def ssh_write(ip: str) -> dict:
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ssh", *SSH_OPTS, f"root@{ip}", SSH_CMD,
+                "ssh",
+                *SSH_OPTS,
+                f"root@{ip}",
+                SSH_CMD,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input=presets_xml_bytes), timeout=20
-            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(input=presets_xml_bytes), timeout=20)
         except asyncio.TimeoutError:
             return {"status": "error", "detail": "SSH timed out"}
         except FileNotFoundError:
@@ -430,12 +436,14 @@ async def sync_presets_to_all_speakers(
         try:
             info = datastore.get_device_info(account_id, device_id)
         except Exception:
-            results.append({
-                "deviceId": device_id,
-                "status": "error",
-                "detail": "Could not read device info",
-                "presets": [],
-            })
+            results.append(
+                {
+                    "deviceId": device_id,
+                    "status": "error",
+                    "detail": "Could not read device info",
+                    "presets": [],
+                }
+            )
             continue
 
         ip = info.ip_address
@@ -445,18 +453,20 @@ async def sync_presets_to_all_speakers(
             await key_cycle(ip)
 
         preset_list = [{"slot": str(p.id), "name": p.name, "status": write_result["status"]} for p in presets]
-        results.append({
-            "deviceId": device_id,
-            "name": info.name,
-            "ip": ip,
-            "status": write_result["status"],
-            "presets": preset_list,
-            "summary": preset_summary,
-            "detail": (
-                f"All {len(presets)} preset(s) written to speaker filesystem and cache refreshed"
-                if write_result["status"] == "ok"
-                else write_result["detail"]
-            ),
-        })
+        results.append(
+            {
+                "deviceId": device_id,
+                "name": info.name,
+                "ip": ip,
+                "status": write_result["status"],
+                "presets": preset_list,
+                "summary": preset_summary,
+                "detail": (
+                    f"All {len(presets)} preset(s) written to speaker filesystem and cache refreshed"
+                    if write_result["status"] == "ok"
+                    else write_result["detail"]
+                ),
+            }
+        )
 
     return {"synced": results, "source": source_device_id}

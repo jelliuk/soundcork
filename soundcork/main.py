@@ -298,14 +298,15 @@ def power_on(request: Request):
 def _decode_content_item(b64: str) -> dict:
     """Decode a base64-encoded ContentItem XML string into a plain dict."""
     import base64
+
     try:
         xml_bytes = base64.b64decode(b64)
         root = ET.fromstring(xml_bytes)
         return {
-            "source":       root.get("source", ""),
-            "type":         root.get("type", ""),
-            "location":     root.get("location", ""),
-            "itemName":     root.findtext("itemName", ""),
+            "source": root.get("source", ""),
+            "type": root.get("type", ""),
+            "location": root.get("location", ""),
+            "itemName": root.findtext("itemName", ""),
             "containerArt": root.findtext("containerArt", ""),
         }
     except Exception:
@@ -380,7 +381,7 @@ def _summarise_inner(inner_type: str, d: dict) -> tuple[str, str]:
         status = d.get("art-status", "")
         uri = d.get("art-uri", "")
         if status == "IMAGE_PRESENT" and uri:
-            return "art_changed", f"Art updated"
+            return "art_changed", "Art updated"
         return "art_changed", f"Art: {status}" if status else "Art changed"
 
     # Unknown inner type — pass through with its raw name

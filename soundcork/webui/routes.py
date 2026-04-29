@@ -29,7 +29,9 @@ def _persist_ws_event(ip: str, message: str) -> None:
     """Parse a WebSocket <updates> message from the speaker and persist notable events."""
     try:
         import xml.etree.ElementTree as _ET
+
         from soundcork.datastore import DataStore as _DS
+
         root = _ET.fromstring(message)
         if root.tag != "updates":
             return
@@ -39,39 +41,56 @@ def _persist_ws_event(ip: str, message: str) -> None:
         np = root.find("nowPlayingUpdated/nowPlaying")
         if np is not None:
             ci = np.find("contentItem") or np.find("ContentItem")
-            ds.save_event(device_id, "now_playing", {
-                "source": np.get("source", ""),
-                "playStatus": getattr(np.find("playStatus"), "text", ""),
-                "itemName": getattr(ci.find("itemName") if ci is not None else None, "text", ""),
-                "track": getattr(np.find("track"), "text", ""),
-                "artist": getattr(np.find("artist"), "text", ""),
-            })
+            ds.save_event(
+                device_id,
+                "now_playing",
+                {
+                    "source": np.get("source", ""),
+                    "playStatus": getattr(np.find("playStatus"), "text", ""),
+                    "itemName": getattr(ci.find("itemName") if ci is not None else None, "text", ""),
+                    "track": getattr(np.find("track"), "text", ""),
+                    "artist": getattr(np.find("artist"), "text", ""),
+                },
+            )
 
         vol = root.find("volumeUpdated/volume")
         if vol is not None:
-            ds.save_event(device_id, "volume_changed", {
-                "targetVolume": getattr(vol.find("targetvolume"), "text", ""),
-                "actualVolume": getattr(vol.find("actualvolume"), "text", ""),
-                "muteEnabled": getattr(vol.find("muteenabled"), "text", "false"),
-            })
+            ds.save_event(
+                device_id,
+                "volume_changed",
+                {
+                    "targetVolume": getattr(vol.find("targetvolume"), "text", ""),
+                    "actualVolume": getattr(vol.find("actualvolume"), "text", ""),
+                    "muteEnabled": getattr(vol.find("muteenabled"), "text", "false"),
+                },
+            )
 
         preset = root.find("presetSelectionUpdated/preset")
         if preset is not None:
             ci = preset.find("contentItem") or preset.find("ContentItem")
-            ds.save_event(device_id, "preset_changed", {
-                "presetId": preset.get("id", ""),
-                "itemName": getattr(ci.find("itemName") if ci is not None else None, "text", ""),
-                "source": ci.get("source", "") if ci is not None else "",
-            })
+            ds.save_event(
+                device_id,
+                "preset_changed",
+                {
+                    "presetId": preset.get("id", ""),
+                    "itemName": getattr(ci.find("itemName") if ci is not None else None, "text", ""),
+                    "source": ci.get("source", "") if ci is not None else "",
+                },
+            )
 
         conn = root.find("connectionStateUpdated")
         if conn is not None:
-            ds.save_event(device_id, "connection_state", {
-                "state": conn.get("state", ""),
-                "up": conn.get("up", ""),
-            })
+            ds.save_event(
+                device_id,
+                "connection_state",
+                {
+                    "state": conn.get("state", ""),
+                    "up": conn.get("up", ""),
+                },
+            )
     except Exception:
         pass  # Never break the WS proxy for event persistence failures
+
 
 # Server-side settings (loaded once at import time, same instance as main app)
 _settings = Settings()
