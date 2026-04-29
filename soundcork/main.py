@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -131,9 +132,22 @@ from soundcork.webui.routes import router as webui_router
 
 app.include_router(webui_router)
 app.include_router(oidc_router)
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "webui", "static")
+
+
+# Serve app.js with no-cache so browsers always revalidate after deploys.
+@app.get("/webui/static/app.js", include_in_schema=False)
+async def serve_app_js():
+    return FileResponse(
+        os.path.join(_STATIC_DIR, "app.js"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
 app.mount(
     "/webui/static",
-    StaticFiles(directory=os.path.join(os.path.dirname(__file__), "webui", "static")),
+    StaticFiles(directory=_STATIC_DIR),
     name="webui_static",
 )
 
@@ -281,6 +295,171 @@ def power_on(request: Request):
     return
 
 
+def _decode_content_item(b64: str) -> dict:
+    """Decode a base64-encoded ContentItem XML string into a plain dict."""
+    import base64
+    try:
+        xml_bytes = base64.b64decode(b64)
+        root = ET.fromstring(xml_bytes)
+        return {
+            "source":       root.get("source", ""),
+            "type":         root.get("type", ""),
+            "location":     root.get("location", ""),
+            "itemName":     root.findtext("itemName", ""),
+            "containerArt": root.findtext("containerArt", ""),
+        }
+    except Exception:
+        return {}
+
+
+def _summarise_inner(inner_type: str, d: dict) -> tuple[str, str]:
+    """Map a Bose inner event type + data to a (canonical_type, summary) pair.
+
+    Inner event types (from payload.events[].type):
+      preset-pressed, play-item, system-state-changed, source-state-changed,
+      art-changed, item-started, play-state-changed, volume-change, power-pressed
+    """
+    t = inner_type.lower().replace(" ", "-")
+
+    if t == "preset-pressed":
+        btn = d.get("buttonId", "")
+        origin = d.get("origin", "")
+        num = btn.replace("PRESET_", "") if btn.startswith("PRESET_") else btn
+        return "preset_pressed", f"Preset {num} pressed" + (f" ({origin})" if origin else "")
+
+    if t == "power-pressed":
+        origin = d.get("origin", "")
+        return "power_pressed", "Power button pressed" + (f" ({origin})" if origin else "")
+
+    if t == "play-item":
+        ci = d.get("contentItem", {})
+        if isinstance(ci, str) and len(ci) > 20:
+            ci = _decode_content_item(ci)
+        name = ci.get("itemName", "") if isinstance(ci, dict) else ""
+        source = ci.get("source", "") if isinstance(ci, dict) else ""
+        return "play_item", name or source or "Play item"
+
+    if t == "item-started":
+        ci = d.get("contentItem", {})
+        if isinstance(ci, str) and len(ci) > 20:
+            ci = _decode_content_item(ci)
+        name = ci.get("itemName", "") if isinstance(ci, dict) else ""
+        source = ci.get("source", "") if isinstance(ci, dict) else ""
+        art = ci.get("containerArt", "") if isinstance(ci, dict) else ""
+        summary = name or source or "Item started"
+        if source and name:
+            summary = f"{name} ({source})"
+        return "item_started", summary
+
+    if t == "source-state-changed":
+        src = d.get("source-state", d.get("source", ""))
+        return "source_changed", f"Source: {src}" if src else "Source changed"
+
+    if t == "system-state-changed":
+        state = d.get("system-state", d.get("state", ""))
+        return "system_state", f"System: {state}" if state else "System state changed"
+
+    if t == "play-state-changed":
+        state = d.get("play-state", d.get("playState", d.get("state", "")))
+        friendly = {
+            "PLAY_STATE": "Playing",
+            "PAUSE_STATE": "Paused",
+            "STOP_STATE": "Stopped",
+            "BUFFERING_STATE": "Buffering",
+        }.get(str(state).upper(), str(state))
+        return "play_state", f"Playback: {friendly}" if state else "Playback state changed"
+
+    if t == "volume-change":
+        vols = d.get("volume-change", [])
+        if isinstance(vols, list) and vols:
+            return "volume_change", f"Volume: {vols[0]} → {vols[-1]}" if len(vols) > 1 else f"Volume: {vols[0]}"
+        vol = d.get("volume", "")
+        return "volume_change", f"Volume: {vol}" if vol else "Volume changed"
+
+    if t == "art-changed":
+        status = d.get("art-status", "")
+        uri = d.get("art-uri", "")
+        if status == "IMAGE_PRESENT" and uri:
+            return "art_changed", f"Art updated"
+        return "art_changed", f"Art: {status}" if status else "Art changed"
+
+    # Unknown inner type — pass through with its raw name
+    return t.replace("-", "_"), inner_type
+
+
+def _persist_telemetry_event(device_id: str, body: bytes) -> None:
+    """Parse a scmudc/stapp telemetry payload and persist each inner event separately.
+
+    The Bose scmudc/stapp payload structure is:
+
+        {
+          "envelope": {
+            "payloadType": "scmudc",   # always "scmudc" — not useful as event type
+            "time": "...",
+            "uniqueId": "68C90B..."
+          },
+          "payload": {
+            "deviceInfo": { ... },
+            "events": [
+              { "type": "preset-pressed", "data": { "buttonId": "PRESET_1", ... }, "time": "..." },
+              { "type": "play-item",      "data": { "contentItem": "<base64 XML>", ... } },
+              ...
+            ]
+          }
+        }
+
+    Each entry in payload.events[] becomes its own stored event so the UI
+    can show one row per meaningful action, not one blob per HTTP POST.
+    """
+    if not body:
+        return
+    try:
+        raw = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        raw = {"raw": body.decode("utf-8", errors="replace")}
+
+    if not isinstance(raw, dict):
+        return
+
+    # ── Locate the inner events list ──────────────────────────────────────
+    # Both the old format (envelope+payload wrapper) and the partially-fixed
+    # format (envelope flattened into data) land here; handle both.
+    payload: dict = raw.get("payload") or {}
+    inner_events: list = payload.get("events") or raw.get("events") or []
+
+    if not inner_events:
+        # No inner events — nothing meaningful to store
+        return
+
+    # ── Process each inner event separately ──────────────────────────────
+    for inner in inner_events:
+        if not isinstance(inner, dict):
+            continue
+        inner_type: str = inner.get("type", "unknown")
+        if inner_type.lower() in {"heartbeat", "keepalive", "ping"}:
+            continue
+
+        inner_data: dict = inner.get("data", {}) or {}
+
+        # Decode base64 contentItem XML where present
+        ci_raw = inner_data.get("contentItem")
+        if isinstance(ci_raw, str) and len(ci_raw) > 20:
+            inner_data = dict(inner_data)
+            inner_data["contentItem"] = _decode_content_item(ci_raw)
+
+        canonical_type, summary = _summarise_inner(inner_type, inner_data)
+
+        store_data: dict = {"_inner_type": inner_type}
+        store_data.update(inner_data)
+        if summary:
+            store_data["_summary"] = summary
+
+        try:
+            datastore.save_event(device_id, canonical_type, store_data)
+        except Exception as exc:
+            logger.warning("Failed to persist inner event %s for %s: %s", inner_type, device_id, exc)
+
+
 @app.post(
     "/v1/scmudc/{device_id}",
     tags=["analytics"],
@@ -301,6 +480,7 @@ async def scmudc_telemetry(device_id: str, request: Request):
     """
     body = await request.body()
     logger.debug("scmudc event from %s: %s", device_id, body[:500])
+    _persist_telemetry_event(device_id, body)
     return Response(status_code=200)
 
 
@@ -325,6 +505,7 @@ async def stapp_telemetry(device_id: str, request: Request):
     """
     body = await request.body()
     logger.debug("stapp event from %s: %s", device_id, body[:500])
+    _persist_telemetry_event(device_id, body)
     return Response(status_code=200)
 
 

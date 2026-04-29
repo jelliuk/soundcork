@@ -11,16 +11,17 @@
  * Get the CSRF token from sessionStorage (password login) or cookie (OIDC login).
  */
 function getCsrfToken() {
-  const stored = sessionStorage.getItem('csrf_token');
-  if (stored) return stored;
-  // OIDC login stores CSRF in a non-httponly cookie
+  // OIDC login stores CSRF in a non-httponly cookie — always prefer it as the
+  // authoritative source, since the cookie is reissued on every login and
+  // reflects the current server-side session. sessionStorage may hold a stale
+  // value from a previous session (e.g. after a container restart).
   const match = document.cookie.match(/webui_csrf=([^;]+)/);
   if (match) {
-    // Move to sessionStorage for consistency
     sessionStorage.setItem('csrf_token', match[1]);
     return match[1];
   }
-  return null;
+  // Password login: token was stored in sessionStorage at login time.
+  return sessionStorage.getItem('csrf_token');
 }
 
 /**
@@ -164,7 +165,7 @@ const api = {
     const proxyPath = path.replace(/^\/mgmt\//, '');
     const resp = await fetch(`/webui/api/mgmt/${proxyPath}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() || '' },
       body: JSON.stringify(body),
     });
     if (!resp.ok) throw new Error(`Mgmt error: ${resp.status}`);
@@ -207,7 +208,7 @@ function parseVolume(xml) {
 
 function parseNowPlaying(xml) {
   const np = xml.querySelector('nowPlaying');
-  const ci = np?.querySelector('ContentItem');
+  const ci = np?.querySelector('contentItem') || np?.querySelector('ContentItem');
   return {
     source: np?.getAttribute('source') || '',
     sourceAccount: np?.getAttribute('sourceAccount') || '',
@@ -228,7 +229,7 @@ function parseNowPlaying(xml) {
 function parsePresets(xml) {
   const presets = [];
   xml.querySelectorAll('preset').forEach(p => {
-    const ci = p.querySelector('ContentItem');
+    const ci = p.querySelector('contentItem') || p.querySelector('ContentItem');
     presets.push({
       id: p.getAttribute('id'),
       itemName: ci?.querySelector('itemName')?.textContent || '',
@@ -246,7 +247,7 @@ function parsePresets(xml) {
 function parseRecents(xml) {
   const recents = [];
   xml.querySelectorAll('recent').forEach(r => {
-    const ci = r.querySelector('ContentItem');
+    const ci = r.querySelector('contentItem') || r.querySelector('ContentItem');
     recents.push({
       deviceId: r.getAttribute('deviceID') || '',
       utcTime: parseInt(r.getAttribute('utcTime') || '0'),
@@ -436,32 +437,32 @@ function renderEmojiPicker(selectedEmoji, onSelect) {
 }
 
 /** Show a confirmation dialog. Returns a promise that resolves true/false. */
-function confirmDialog(title, message) {
+function confirmDialog(title, message, { okOnly = false } = {}) {
   return new Promise(resolve => {
     const overlay = document.createElement('div');
     overlay.className = 'dialog-overlay';
+    const messageHtml = escapeHtml(message).replace(/\n/g, '<br>');
     overlay.innerHTML = `
       <div class="dialog">
         <h2>${escapeHtml(title)}</h2>
-        <p>${escapeHtml(message)}</p>
+        <p style="white-space:pre-wrap">${messageHtml}</p>
         <div class="dialog-actions">
-          <button class="btn" data-action="cancel">Cancel</button>
-          <button class="btn btn-danger" data-action="confirm">Confirm</button>
+          ${okOnly ? '' : '<button class="btn" data-action="cancel">Cancel</button>'}
+          <button class="btn ${okOnly ? '' : 'btn-danger'}" data-action="confirm">${okOnly ? 'OK' : 'Confirm'}</button>
         </div>
       </div>`;
-    overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => {
-      overlay.remove();
-      resolve(false);
-    });
+    if (!okOnly) {
+      overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+        overlay.remove();
+        resolve(false);
+      });
+    }
     overlay.querySelector('[data-action="confirm"]').addEventListener('click', () => {
       overlay.remove();
       resolve(true);
     });
     overlay.addEventListener('click', e => {
-      if (e.target === overlay) {
-        overlay.remove();
-        resolve(false);
-      }
+      if (e.target === overlay) { overlay.remove(); resolve(false); }
     });
     document.body.appendChild(overlay);
   });
@@ -781,6 +782,7 @@ function renderSpeakerDetail(main, ip) {
     <button class="actions-dropdown-item" data-action="events">Device Events</button>
     <button class="actions-dropdown-item" data-action="zones">Zones</button>
     <button class="actions-dropdown-item" data-action="standby">Standby</button>
+    <button class="actions-dropdown-item" data-action="sync-presets">&#x1F504; Sync Presets to All Speakers</button>
     <button class="actions-dropdown-item danger" data-action="delete">Delete Speaker</button>`;
 
   let dropdownOpen = false;
@@ -810,6 +812,102 @@ function renderSpeakerDetail(main, ip) {
             await api.speakerGet(ip, 'standby');
             showToast('Standby sent', 'success');
           } catch (err) { showToast(err.message, 'error'); }
+        }
+      } else if (action === 'sync-presets') {
+        try {
+          // Fetch account info from this speaker to get account ID + device ID
+          const infoXml = await api.speakerGet(ip, 'info');
+          const info = parseInfo(infoXml);
+          if (!info.accountId) throw new Error('Could not determine account ID from speaker');
+
+          // Discover all speakers in the account so user can pick the source
+          const discovered = await api.mgmtGet(`accounts/${info.accountId}/speakers`);
+          const allSpeakers = (discovered.speakers || []);
+
+          if (allSpeakers.length < 2) {
+            showToast('Only one speaker in account — nothing to sync to', 'info');
+            return;
+          }
+
+          // Show a device-picker dialog using the standard overlay pattern
+          const sourceDeviceId = await new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.className = 'dialog-overlay';
+
+            const sourceOptions = allSpeakers.map(s =>
+              `<option value="${escapeHtml(s.deviceId)}" ${s.deviceId === info.deviceId ? 'selected' : ''}>` +
+              `${escapeHtml(s.name)} (${escapeHtml(s.ipAddress)})` +
+              `</option>`
+            ).join('');
+
+            const targetNames = allSpeakers
+              .filter(s => s.deviceId !== info.deviceId)
+              .map(s => `• ${escapeHtml(s.name)} (${escapeHtml(s.ipAddress)})`)
+              .join('<br>');
+
+            overlay.innerHTML = `
+              <div class="dialog">
+                <h2>Sync Presets</h2>
+                <p style="margin:0 0 8px">Choose the <strong>source</strong> speaker whose presets will be pushed to all others:</p>
+                <select id="sync-source-select" style="width:100%;padding:6px;margin-bottom:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+                  ${sourceOptions}
+                </select>
+                <p style="margin:0 0 16px;font-size:0.85em;color:var(--text-muted)">
+                  <strong>Targets:</strong><br>${targetNames}
+                </p>
+                <div class="dialog-actions">
+                  <button class="btn" data-action="cancel">Cancel</button>
+                  <button class="btn btn-primary" data-action="confirm">Next</button>
+                </div>
+              </div>`;
+
+            overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+              overlay.remove(); resolve(null);
+            });
+            overlay.querySelector('[data-action="confirm"]').addEventListener('click', () => {
+              const val = overlay.querySelector('#sync-source-select').value;
+              overlay.remove(); resolve(val);
+            });
+            overlay.addEventListener('click', e => {
+              if (e.target === overlay) { overlay.remove(); resolve(null); }
+            });
+            document.body.appendChild(overlay);
+          });
+
+          if (!sourceDeviceId) return;
+
+          const sourceSpeaker = allSpeakers.find(s => s.deviceId === sourceDeviceId);
+          const targets = allSpeakers.filter(s => s.deviceId !== sourceDeviceId);
+
+          const confirmed = await confirmDialog(
+            'Confirm Sync',
+            `Push presets from "${sourceSpeaker?.name || sourceDeviceId}" to ${targets.length} other speaker(s)?\n\n` +
+            targets.map(s => `• ${s.name} (${s.ipAddress})`).join('\n')
+          );
+          if (!confirmed) return;
+
+          showToast('Syncing presets…', 'info');
+          const result = await api.mgmtPost(
+            `accounts/${info.accountId}/sync-presets?source_device_id=${encodeURIComponent(sourceDeviceId)}`
+          );
+
+          const lines = result.synced.map(s => {
+            const presetLines = Array.isArray(s.presets)
+              ? s.presets.map(p => {
+                  const icon = p.status === 'ok' ? '  ✅' : '  ❌';
+                  return `${icon} Slot ${p.slot}: ${p.name}${p.status !== 'ok' ? ` — ${p.detail}` : ''}`;
+                }).join('\n')
+              : '';
+            const header =
+              s.status === 'ok'      ? `✅ ${s.name} — ${s.detail}` :
+              s.status === 'partial' ? `⚠️ ${s.name} — ${s.detail}` :
+                                       `❌ ${s.name || s.deviceId}: ${s.detail || s.status}`;
+            return presetLines ? `${header}\n${presetLines}` : header;
+          });
+
+          await confirmDialog('Sync Complete', lines.join('\n\n'), { okOnly: true });
+        } catch (err) {
+          showToast('Sync failed: ' + err.message, 'error');
         }
       } else if (action === 'delete') {
         const ok = await confirmDialog('Delete Speaker', `Remove ${speaker.name}?`);
@@ -1847,63 +1945,246 @@ function renderSpotifyAccounts(main) {
 // -------------------------------------------------------------------
 
 function renderDeviceEvents(main, deviceId) {
+  const speaker = state.speakers.find(s => s.deviceId === deviceId);
+  const speakerName = speaker?.name || deviceId;
+
   main.innerHTML = `
     <div class="page-header">
       <button class="back-btn" id="back-btn">&#x2190;</button>
       <h1>Device Events</h1>
     </div>
-    <p class="text-muted text-sm mb-2 mono">${escapeHtml(deviceId)}</p>
+    <p class="text-muted text-sm mb-2">
+      ${escapeHtml(speakerName)}
+      <span class="mono" style="opacity:0.5;font-size:0.75em;margin-left:0.5em">${escapeHtml(deviceId)}</span>
+    </p>
+    <div id="events-summary"></div>
+    <div id="events-filter" style="display:none"></div>
     <div id="events-list"><div class="spinner"></div></div>`;
 
-  // Try to find speaker to navigate back
-  const speaker = state.speakers.find(s => s.deviceId === deviceId);
   main.querySelector('#back-btn').addEventListener('click', () => {
     if (speaker) navigate('#/speaker/' + speaker.ipAddress);
     else navigate('#/speakers');
   });
 
+  // ── Canonical event metadata ─────────────────────────────────────────────
+  // Keyed on the canonical type stored by the backend.
+  // New per-inner-event types from _summarise_inner() in main.py:
+  //   preset_pressed, power_pressed, play_item, item_started, source_changed,
+  //   system_state, play_state, volume_change, art_changed
+  // Legacy WebSocket types from routes.py:
+  //   connection_state, now_playing, volume_changed, preset_changed
+  const EVENT_META = {
+    // ── Telemetry (inner events) ──────────────────────────────────────────
+    preset_pressed:  { icon: '🎛️',  label: 'Preset Pressed',   group: 'Presets' },
+    play_item:       { icon: '▶️',   label: 'Play Item',        group: 'Playback' },
+    item_started:    { icon: '🎵',   label: 'Now Playing',      group: 'Playback' },
+    play_state:      { icon: '⏯️',   label: 'Playback State',   group: 'Playback' },
+    source_changed:  { icon: '📻',   label: 'Source Changed',   group: 'Playback' },
+    system_state:    { icon: '🔌',   label: 'System State',     group: 'Power' },
+    power_pressed:   { icon: '🟢',   label: 'Power',            group: 'Power' },
+    volume_change:   { icon: '🔊',   label: 'Volume',           group: 'Volume' },
+    art_changed:     { icon: '🖼️',   label: 'Art Changed',      group: 'Playback' },
+    // ── WebSocket (connection) ────────────────────────────────────────────
+    connection_state:{ icon: '📶',   label: 'WiFi State',       group: 'Network' },
+    // ── WebSocket (now playing / volume / preset) — legacy ────────────────
+    now_playing:     { icon: '▶️',   label: 'Now Playing',      group: 'Playback' },
+    volume_changed:  { icon: '🔊',   label: 'Volume',           group: 'Volume' },
+    preset_changed:  { icon: '🎛️',   label: 'Preset Changed',   group: 'Presets' },
+  };
+
+  function meta(type) {
+    return EVENT_META[type] || { icon: '📋', label: type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), group: 'Other' };
+  }
+
+  // ── Summary builder ──────────────────────────────────────────────────────
+  function formatSummary(ev) {
+    const d = ev.data || {};
+
+    // Backend pre-computed — always prefer this
+    if (d._summary) return d._summary;
+
+    // Fallbacks for legacy WebSocket events stored by routes.py
+    switch (ev.type) {
+      case 'now_playing': {
+        const parts = [d.itemName, d.artist, d.track].filter(Boolean);
+        return parts.length ? parts.join(' — ') : (d.source || '');
+      }
+      case 'volume_changed': {
+        const vol = d.actualVolume ?? d.targetVolume ?? '';
+        const muted = d.muteEnabled === 'true';
+        return `Volume ${vol}${muted ? ' (muted)' : ''}`;
+      }
+      case 'preset_changed':
+        return `Preset ${d.presetId || ''}: ${d.itemName || d.source || ''}`.replace(/:\s*$/, '').trim();
+      case 'connection_state':
+        return `${d.state || ''} (up: ${d.up || ''})`;
+      default:
+        return '';
+    }
+  }
+
+  // ── Device summary card ──────────────────────────────────────────────────
+  function buildSummaryCard(events) {
+    let lastPower = null, lastWifi = null, lastPlaying = null;
+
+    for (const ev of events) {
+      if (!lastPower && (ev.type === 'power_pressed' || ev.type === 'system_state')) {
+        lastPower = ev.timestamp;
+      }
+      if (!lastWifi && ev.type === 'connection_state') {
+        const d = ev.data || {};
+        if ((d.state || '').includes('CONNECTED') || d.up === 'true') {
+          lastWifi = ev.timestamp;
+        }
+      }
+      if (!lastPlaying) {
+        if (ev.type === 'item_started' || ev.type === 'now_playing') {
+          const d = ev.data || {};
+          const name = d._summary || d.itemName || d.track || d.artist || d.source || '';
+          if (name) lastPlaying = { name: name.replace(/\s*\(.*\)$/, ''), ts: ev.timestamp };
+        } else if (ev.type === 'preset_pressed' || ev.type === 'preset_changed') {
+          const d = ev.data || {};
+          const name = d._summary || '';
+          if (name) lastPlaying = { name, ts: ev.timestamp };
+        }
+      }
+    }
+
+    const fmt = ts => ts ? new Date(ts).toLocaleString() : '—';
+    const row = (label, value, sub) =>
+      `<div class="detail-row">` +
+        `<span class="detail-row-label">${label}</span>` +
+        `<span class="detail-row-value">${value}` +
+          (sub ? `<br><span class="text-muted text-sm">${escapeHtml(sub)}</span>` : '') +
+        `</span>` +
+      `</div>`;
+
+    return `<div class="card mb-2" style="margin-bottom:1rem">` +
+      `<div style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.06em;opacity:0.55;margin-bottom:0.6rem;font-weight:600">Device Summary</div>` +
+      row('Last Power On',          fmt(lastPower)) +
+      row('Last WiFi Connection',   fmt(lastWifi)) +
+      row('Last Station / Preset',
+          lastPlaying ? escapeHtml(lastPlaying.name) : '—',
+          lastPlaying ? fmt(lastPlaying.ts) : null) +
+    `</div>`;
+  }
+
+  // ── Filter bar ───────────────────────────────────────────────────────────
+  let activeFilter = 'all';
+
+  function buildFilterBar(events, listContainer) {
+    // Count by group so we don't have 9 separate buttons
+    const groupCounts = {};
+    for (const ev of events) {
+      const g = meta(ev.type).group;
+      groupCounts[g] = (groupCounts[g] || 0) + 1;
+    }
+    const groups = Object.keys(groupCounts).sort();
+
+    const filterEl = main.querySelector('#events-filter');
+    filterEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:1rem;';
+
+    function makeBtn(label, value, count) {
+      const isActive = value === activeFilter;
+      const btn = document.createElement('button');
+      btn.style.cssText = [
+        'cursor:pointer', 'padding:0.25rem 0.65rem',
+        'border:1px solid var(--border)', 'border-radius:999px', 'font-size:0.78rem',
+        `background:${isActive ? 'var(--accent,#1a73e8)' : 'var(--surface)'}`,
+        `color:${isActive ? '#fff' : 'inherit'}`,
+      ].join(';');
+      btn.textContent = count !== undefined ? `${label} (${count})` : label;
+      btn.addEventListener('click', () => {
+        activeFilter = value;
+        renderList(events, listContainer);
+        filterEl.innerHTML = '';
+        buildButtons();
+      });
+      return btn;
+    }
+
+    function buildButtons() {
+      filterEl.appendChild(makeBtn('All', 'all', events.length));
+      for (const g of groups) {
+        filterEl.appendChild(makeBtn(g, g, groupCounts[g]));
+      }
+    }
+    buildButtons();
+  }
+
+  // ── Event list ───────────────────────────────────────────────────────────
+  function renderList(events, container) {
+    const filtered = activeFilter === 'all'
+      ? events
+      : events.filter(ev => meta(ev.type).group === activeFilter);
+
+    container.innerHTML = '';
+
+    const hdr = document.createElement('p');
+    hdr.className = 'text-muted text-sm';
+    hdr.style.marginBottom = '0.5rem';
+    hdr.textContent = activeFilter === 'all'
+      ? `Showing ${filtered.length} events`
+      : `Showing ${filtered.length} of ${events.length} events · ${activeFilter}`;
+    container.appendChild(hdr);
+
+    if (filtered.length === 0) {
+      const el = document.createElement('div');
+      el.className = 'empty-state';
+      el.innerHTML = '<p class="text-muted text-sm">No events match this filter.</p>';
+      container.appendChild(el);
+      return;
+    }
+
+    filtered.forEach(ev => {
+      const m = meta(ev.type);
+      const ts = ev.timestamp ? new Date(ev.timestamp).toLocaleString() : '';
+      const summary = formatSummary(ev);
+      const d = ev.data || {};
+
+      // Show album art thumbnail for item_started events when available
+      const artUrl = d.containerArt || (d.nowPlaying?.art?.text) || '';
+      const thumb = artUrl
+        ? `<img src="${escapeHtml(artUrl)}" style="width:2.5rem;height:2.5rem;border-radius:4px;object-fit:cover;flex-shrink:0" onerror="this.style.display='none'">`
+        : `<div class="list-item-thumb-placeholder" style="font-size:1.4rem;min-width:2.5rem;text-align:center">${m.icon}</div>`;
+
+      const item = document.createElement('div');
+      item.className = 'list-item';
+      item.innerHTML =
+        thumb +
+        `<div class="list-item-body">` +
+          `<div class="list-item-title">${escapeHtml(m.label)}</div>` +
+          `<div class="list-item-subtitle">` +
+            (summary ? escapeHtml(summary) + ' &middot; ' : '') + escapeHtml(ts) +
+          `</div>` +
+        `</div>`;
+      container.appendChild(item);
+    });
+  }
+
+  // ── Load ─────────────────────────────────────────────────────────────────
   (async () => {
     try {
-      const data = await api.mgmtGet(`/mgmt/devices/${deviceId}/events`);
+      const data = await api.mgmtGet(`/mgmt/devices/${deviceId}/events?limit=200`);
       const events = data.events || [];
-      const container = main.querySelector('#events-list');
+      const summaryEl  = main.querySelector('#events-summary');
+      const listContainer = main.querySelector('#events-list');
 
       if (events.length === 0) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#x1F4CB;</div><p>No events recorded</p></div>';
+        listContainer.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">📋</div>
+            <p>No events recorded yet.</p>
+            <p class="text-muted text-sm">Events are captured from the speaker's telemetry
+            stream and WebSocket updates and will appear here as the speaker is used.</p>
+          </div>`;
         return;
       }
 
-      // Sort newest first
-      const sorted = [...events].sort((a, b) => {
-        const tA = new Date(a.timestamp || a.created_at || 0).getTime();
-        const tB = new Date(b.timestamp || b.created_at || 0).getTime();
-        return tB - tA;
-      });
+      summaryEl.innerHTML = buildSummaryCard(events);
+      buildFilterBar(events, listContainer);
+      renderList(events, listContainer);
 
-      container.innerHTML = '';
-      sorted.forEach(ev => {
-        const eventIcons = {
-          preset_changed: '&#x1F3B5;',
-          volume_changed: '&#x1F50A;',
-          power: '&#x23FB;',
-          zone_changed: '&#x1F517;',
-          now_playing: '&#x25B6;',
-        };
-        const evType = ev.type || ev.event_type || 'event';
-        const icon = eventIcons[evType] || '&#x1F4E2;';
-        const ts = ev.timestamp || ev.created_at || '';
-        const summary = ev.summary || ev.description || JSON.stringify(ev.data || '');
-
-        const item = document.createElement('div');
-        item.className = 'list-item';
-        item.innerHTML = `
-          <div class="list-item-thumb-placeholder">${icon}</div>
-          <div class="list-item-body">
-            <div class="list-item-title">${escapeHtml(evType)}</div>
-            <div class="list-item-subtitle">${escapeHtml(ts)}${summary ? ' &middot; ' + escapeHtml(String(summary).slice(0, 80)) : ''}</div>
-          </div>`;
-        container.appendChild(item);
-      });
     } catch (err) {
       showToast(err.message, 'error');
       main.querySelector('#events-list').innerHTML =
@@ -1911,10 +2192,6 @@ function renderDeviceEvents(main, deviceId) {
     }
   })();
 }
-
-// -------------------------------------------------------------------
-// 7.13: Config
-// -------------------------------------------------------------------
 
 function renderConfig(main) {
   const cfg = state.config;

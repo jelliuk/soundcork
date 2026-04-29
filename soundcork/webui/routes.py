@@ -20,6 +20,58 @@ router = APIRouter(prefix="/webui", tags=["webui"])
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 SPEAKER_PORT = 8090
 SPEAKER_TIMEOUT = 10.0
+# Longer timeout for management operations that fan out across multiple speakers
+# (e.g. sync-presets writes to every device sequentially).
+MGMT_TIMEOUT = 60.0
+
+
+def _persist_ws_event(ip: str, message: str) -> None:
+    """Parse a WebSocket <updates> message from the speaker and persist notable events."""
+    try:
+        import xml.etree.ElementTree as _ET
+        from soundcork.datastore import DataStore as _DS
+        root = _ET.fromstring(message)
+        if root.tag != "updates":
+            return
+        device_id = root.get("deviceID", "") or ip.replace(".", "_")
+        ds = _DS()
+
+        np = root.find("nowPlayingUpdated/nowPlaying")
+        if np is not None:
+            ci = np.find("contentItem") or np.find("ContentItem")
+            ds.save_event(device_id, "now_playing", {
+                "source": np.get("source", ""),
+                "playStatus": getattr(np.find("playStatus"), "text", ""),
+                "itemName": getattr(ci.find("itemName") if ci is not None else None, "text", ""),
+                "track": getattr(np.find("track"), "text", ""),
+                "artist": getattr(np.find("artist"), "text", ""),
+            })
+
+        vol = root.find("volumeUpdated/volume")
+        if vol is not None:
+            ds.save_event(device_id, "volume_changed", {
+                "targetVolume": getattr(vol.find("targetvolume"), "text", ""),
+                "actualVolume": getattr(vol.find("actualvolume"), "text", ""),
+                "muteEnabled": getattr(vol.find("muteenabled"), "text", "false"),
+            })
+
+        preset = root.find("presetSelectionUpdated/preset")
+        if preset is not None:
+            ci = preset.find("contentItem") or preset.find("ContentItem")
+            ds.save_event(device_id, "preset_changed", {
+                "presetId": preset.get("id", ""),
+                "itemName": getattr(ci.find("itemName") if ci is not None else None, "text", ""),
+                "source": ci.get("source", "") if ci is not None else "",
+            })
+
+        conn = root.find("connectionStateUpdated")
+        if conn is not None:
+            ds.save_event(device_id, "connection_state", {
+                "state": conn.get("state", ""),
+                "up": conn.get("up", ""),
+            })
+    except Exception:
+        pass  # Never break the WS proxy for event persistence failures
 
 # Server-side settings (loaded once at import time, same instance as main app)
 _settings = Settings()
@@ -317,14 +369,16 @@ async def proxy_mgmt_post(path: str, request: Request):
     content_type = request.headers.get("content-type", "application/json")
     base = _settings.base_url or "http://localhost:8000"
     auth = httpx.BasicAuth(_settings.mgmt_username, _settings.mgmt_password)
+    qs = request.url.query
+    forwarded_url = f"{base}/mgmt/{path}" + (f"?{qs}" if qs else "")
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                f"{base}/mgmt/{path}",
+                forwarded_url,
                 content=body,
                 headers={"Content-Type": content_type},
                 auth=auth,
-                timeout=SPEAKER_TIMEOUT,
+                timeout=MGMT_TIMEOUT,
             )
         return Response(
             content=resp.content,
@@ -528,6 +582,7 @@ async def proxy_speaker_websocket(websocket: WebSocket, ip: str):
                 try:
                     async for message in speaker_ws:
                         await websocket.send_text(message)
+                        _persist_ws_event(ip, message)
                 except websockets.ConnectionClosed:
                     pass
 

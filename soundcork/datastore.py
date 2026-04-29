@@ -1,5 +1,7 @@
+import json
 import logging
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from os import mkdir, path, remove, rmdir, walk
 from typing import Optional
 
@@ -7,6 +9,7 @@ from soundcork.config import Settings
 from soundcork.constants import (
     DEVICE_INFO_FILE,
     DEVICES_DIR,
+    EVENTS_FILE,
     PRESETS_FILE,
     RECENTS_FILE,
     SOURCES_FILE,
@@ -312,6 +315,49 @@ class DataStore:
         )
 
     ######## create account
+
+
+    # ── Device Event Log ─────────────────────────────────────────────────────
+
+    def _device_events_path(self, device_id: str) -> str:
+        """Return path to Events.json, searching across all accounts."""
+        for account in self.list_accounts():
+            for dev in self.list_devices(account):
+                if dev.upper() == device_id.upper():
+                    return self._safe_data_path(account, DEVICES_DIR, dev, EVENTS_FILE)
+        raise FileNotFoundError(f"Device {device_id} not found in any account")
+
+    def save_event(self, device_id: str, event_type: str, data: dict) -> None:
+        """Append one event to Events.json (ring-buffer, max 200 entries)."""
+        try:
+            events_path = self._device_events_path(device_id)
+        except FileNotFoundError:
+            logger.debug("save_event: device %s not found, skipping", device_id)
+            return
+        try:
+            with open(events_path, "r") as f:
+                events = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            events = []
+        events.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "type": event_type,
+            "data": data,
+        })
+        events = events[-200:]
+        with open(events_path, "w") as f:
+            json.dump(events, f)
+
+    def get_events(self, device_id: str) -> list[dict]:
+        """Return stored events for a device, newest first."""
+        try:
+            with open(self._device_events_path(device_id), "r") as f:
+                return list(reversed(json.load(f)))
+        except FileNotFoundError:
+            return []
+        except json.JSONDecodeError:
+            logger.warning("Events.json for %s is corrupt, resetting", device_id)
+            return []
 
     def list_accounts(self) -> list[Optional[str]]:
         accounts: list[str | None] = []
