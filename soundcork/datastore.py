@@ -316,7 +316,6 @@ class DataStore:
 
     ######## create account
 
-
     # ── Device Event Log ─────────────────────────────────────────────────────
 
     def _device_events_path(self, device_id: str) -> str:
@@ -339,11 +338,13 @@ class DataStore:
                 events = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             events = []
-        events.append({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "type": event_type,
-            "data": data,
-        })
+        events.append(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "type": event_type,
+                "data": data,
+            }
+        )
         events = events[-200:]
         with open(events_path, "w") as f:
             json.dump(events, f)
