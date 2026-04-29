@@ -6,9 +6,9 @@ your speaker's cloud traffic to your SoundCork server.
 
 ## Prerequisites
 
-- Bose SoundTouch speaker (tested on SoundTouch 20, firmware 27.0.6)
+- Bose SoundTouch speaker (tested on SoundTouch 10 - firmware 27.0.6)
 - Clean FAT32-formatted USB stick
-- Ethernet cable (recommended for initial setup)
+- USB OTG (On The Go) Adapter
 - Computer on the same network as the speaker
 
 ## Step 1: Enable SSH Access
@@ -35,16 +35,10 @@ firmware 27.x. You must use the USB stick method instead:
 6. Power on the speaker.
 7. Wait approximately 60 seconds.
 
-> **A note on connectivity**: During our testing, we initially failed with WiFi
-> and a USB stick containing macOS junk files. We succeeded after cleaning the
-> USB AND switching to Ethernet. We changed both variables simultaneously, so we
-> cannot confirm which was the actual fix. If WiFi doesn't work for you, try
-> connecting the speaker via Ethernet cable as well.
-
 Then SSH in:
 
 ```sh
-ssh root@<speaker-ip>
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip>
 ```
 
 No password is required.
@@ -101,7 +95,7 @@ curl http://<speaker-ip>:8090/info > DeviceInfo.xml
 API. You must retrieve it over SSH:
 
 ```sh
-ssh root@<speaker-ip>
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip>
 cat /mnt/nv/BoseApp-Persistence/1/Sources.xml
 ```
 
@@ -148,15 +142,11 @@ The speaker's root filesystem is read-only by default. You must switch it to
 read-write mode before editing any files:
 
 ```sh
-ssh root@<speaker-ip>
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip>
 rw
 ```
 
 ### Edit the server configuration
-
-```sh
-vi /opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
-```
 
 Change all 4 server URLs to point to your SoundCork instance:
 
@@ -167,8 +157,26 @@ Change all 4 server URLs to point to your SoundCork instance:
 | updates | `https://worldwide.bose.com`        | `https://your-soundcork-server` |
 | stats   | `https://events.api.bosecm.com`     | `https://your-soundcork-server` |
 
-Reboot the speaker for changes to take effect. The speaker will now send all
-cloud traffic to your SoundCork server.
+Reboot the speaker for changes to take effect. The speaker will now send all cloud traffic to your SoundCork server.
+
+#### Option 1 - Automate Replacement via sed
+
+```sh
+NEW_URL="https://soundcork.domain.co.uk"
+
+sed -i.bak -E "
+s|(<margeServerUrl>)https://streaming\.bose\.com(</margeServerUrl>)|\1${NEW_URL}\2|;
+s|(<statsServerUrl>)https://events\.api\.bosecm\.com(</statsServerUrl>)|\1${NEW_URL}\2|;
+s|(<swUpdateUrl>)https://worldwide\.bose\.com|\1${NEW_URL}|;
+s|(<bmxRegistryUrl>)https://content\.api\.bose\.io|\1${NEW_URL}|;
+" /opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
+```
+
+#### Option 2 - Manual Edit via vi
+```sh
+vi /opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
+```
+
 
 ## Step 4: Harden SSH Access (Recommended)
 
@@ -186,10 +194,10 @@ You should restrict SSH to key-based authentication only.
 
 ```sh
 # Remount the rootfs as read-write
-ssh root@<speaker-ip> mount -o remount,rw /
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> mount -o remount,rw /
 
 # Create the .ssh directory in root's home (/home/root on SoundTouch)
-ssh root@<speaker-ip> 'mkdir -p /home/root/.ssh && chmod 700 /home/root/.ssh'
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> 'mkdir -p /home/root/.ssh && chmod 700 /home/root/.ssh'
 
 # Upload your public key
 cat ~/.ssh/id_rsa.pub | ssh root@<speaker-ip> \
@@ -199,7 +207,7 @@ cat ~/.ssh/id_rsa.pub | ssh root@<speaker-ip> \
 ### 2. Create the hardened sshd config
 
 ```sh
-ssh root@<speaker-ip> 'cat > /mnt/nv/sshd_config' << 'EOF'
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> 'cat > /mnt/nv/sshd_config' << 'EOF'
 # Hardened sshd_config for Bose SoundTouch
 # Stored on /mnt/nv/ (persistent), applied at boot via rc.local
 UsePrivilegeSeparation no
@@ -296,7 +304,7 @@ alongside the server-side primer.
 ### 1. Create the config file
 
 ```sh
-ssh root@<speaker-ip>
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip>
 
 cat > /mnt/nv/BoseApp-Persistence/1/spotify-primer.conf << 'EOF'
 SOUNDCORK_URL=https://soundcork.example.com
@@ -332,7 +340,7 @@ If you already have an `rc.local` from Step 4 (SSH hardening), add the primer
 to the end:
 
 ```sh
-ssh root@<speaker-ip> 'cat >> /mnt/nv/rc.local' << 'EOF'
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> 'cat >> /mnt/nv/rc.local' << 'EOF'
 
 # Spotify boot primer — backgrounds and waits for port 8200
 /mnt/nv/bin/spotify-boot-primer &
@@ -342,7 +350,7 @@ EOF
 If you don't have an `rc.local` yet, create one:
 
 ```sh
-ssh root@<speaker-ip> 'cat > /mnt/nv/rc.local' << 'EOF'
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> 'cat > /mnt/nv/rc.local' << 'EOF'
 #!/bin/bash
 /mnt/nv/bin/spotify-boot-primer &
 EOF
@@ -354,7 +362,7 @@ ssh root@<speaker-ip> chmod +x /mnt/nv/rc.local
 This lets you run `spotify-boot-primer` directly from an SSH session:
 
 ```sh
-ssh root@<speaker-ip> 'cat > /mnt/nv/.profile' << 'EOF'
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> 'cat > /mnt/nv/.profile' << 'EOF'
 export PATH="/mnt/nv/bin:$PATH"
 EOF
 ```
@@ -363,16 +371,17 @@ EOF
 
 ```sh
 # Manual test (speaker must be running):
-ssh root@<speaker-ip> /mnt/nv/bin/spotify-boot-primer
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> /mnt/nv/bin/spotify-boot-primer
 
 # Check logs:
-ssh root@<speaker-ip> 'logread | grep spotify-primer'
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> 'logread | grep spotify-primer'
 
 # Full test — reboot and verify:
 echo "sys reboot" | nc -w 5 <speaker-ip> 17000
+
 # Wait ~30 seconds, then:
-ssh root@<speaker-ip> 'logread | grep spotify-primer'
-ssh root@<speaker-ip> 'curl -s "http://localhost:8200/zc?action=getInfo"'
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> 'logread | grep spotify-primer'
+ssh -oHostKeyAlgorithms=ssh-rsa root@<speaker-ip> 'curl -s "http://localhost:8200/zc?action=getInfo"'
 # Look for "activeUser" in the output
 ```
 
