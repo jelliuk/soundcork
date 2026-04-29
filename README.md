@@ -19,15 +19,16 @@ Credits: [Thanks To](https://github.com/jelliuk/soundcork#-credits)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| TuneIn radio presets | Working | Presets 1-6, station playback |
+| Device Presets | Working | Presets 1-6, TuneIn and Internet Radio Playback |
+| Device Presets Sync | Working | Synchronise Soundcork Presets to All Devices (requires SSH access) |
 | Spotify Connect | Working | Cast from the Spotify app — independent of Bose servers |
 | Spotify presets | Working | Requires a [one-time kick-start](docs/spotify.md#fixing-spotify-presets) via Spotify Connect |
 | Web UI | Working | Browser-based speaker control at `/webui/` |
-| SSO/OIDC authentication | Working | Optional — works with any OIDC provider (Authentik, Keycloak, Auth0, etc.) |
+| SSO/OIDC authentication | Working | Optional — works with any OIDC provider (Authentik, Keycloak, Auth0,  TinyAuth etc.) |
 | AUX input | Working | Not affected by shutdown |
 | Bluetooth | Working | Not affected by shutdown |
 | Firmware updates | Blocked | SoundCork returns "no updates available" |
-| SoundTouch app presets | Working | Configure TuneIn presets via the Web UI or [Bose CLI](https://github.com/timvw/bose) |
+| Device Telemetry | Working | Overview of Device Activity (Power On, Select Source, etc.) |
 
 ---
 ## 👓 Screenshots
@@ -114,18 +115,6 @@ When OIDC is configured, the login page shows a "Sign in with SSO" button. When 
 SoundTouch speakers communicate with four Bose cloud servers. SoundCork replaces all of them by editing the speaker's configuration to point to your server instead.
 
 See [Architecture](docs/architecture.md) for details on the Bose servers, operating modes, and data flows.
-
----
-## 💻 Bose CLI
-
-The [Bose CLI](https://github.com/timvw/bose) talks directly to the speaker's local API (port 8090) and works independently of any cloud server:
-
-```bash
-brew install timvw/tap/bose
-bose preset    # view presets
-bose status    # speaker status
-bose volume 30 # set volume
-```
 
 ---
 ## 📰 Documentation
