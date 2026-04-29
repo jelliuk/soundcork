@@ -20,15 +20,15 @@ Credits: [Thanks To](https://github.com/jelliuk/soundcork#-credits)
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Device Presets | Working | Presets 1-6, TuneIn and Internet Radio Playback |
-| Device Presets Sync | Working | Synchronise Soundcork Presets to All Devices (requires SSH access) |
+| Device Presets Sync | Working | Synchronise Soundcork Presets to All Devices (requires SSH access to speakers) |
 | Spotify Connect | Working | Cast from the Spotify app — independent of Bose servers |
-| Spotify presets | Working | Requires a [one-time kick-start](docs/spotify.md#fixing-spotify-presets) via Spotify Connect |
+| Spotify Presets | Working | Requires a [one-time kick-start](docs/spotify.md#fixing-spotify-presets) via Spotify Connect |
 | Web UI | Working | Browser-based speaker control at `/webui/` |
-| SSO/OIDC authentication | Working | Optional — works with any OIDC provider (Authentik, Keycloak, Auth0,  TinyAuth etc.) |
-| AUX input | Working | Not affected by shutdown |
+| SSO/OIDC Authentication | Working | Optional — works with any OIDC provider (Authentik, Keycloak, Auth0,  TinyAuth etc.) |
+| AUX Input | Working | Not affected by shutdown |
 | Bluetooth | Working | Not affected by shutdown |
-| Firmware updates | Blocked | SoundCork returns "no updates available" |
-| Device Telemetry | Working | Overview of Device Activity (Power On, Select Source, etc.) |
+| Firmware Updates | Blocked | SoundCork returns "no updates available" |
+| Device Telemetry | Working | Overview of Device Activity (Power On, Network Connectivity, Select Source, Volume Change, etc.) |
 
 ---
 ## 👓 Screenshots
