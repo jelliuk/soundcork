@@ -1975,25 +1975,57 @@ function renderDeviceEvents(main, deviceId) {
   //   connection_state, now_playing, volume_changed, preset_changed
   const EVENT_META = {
     // ── Telemetry (inner events) ──────────────────────────────────────────
-    preset_pressed:  { icon: '🎛️',  label: 'Preset Pressed',   group: 'Presets' },
-    play_item:       { icon: '▶️',   label: 'Play Item',        group: 'Playback' },
-    item_started:    { icon: '🎵',   label: 'Now Playing',      group: 'Playback' },
-    play_state:      { icon: '⏯️',   label: 'Playback State',   group: 'Playback' },
-    source_changed:  { icon: '📻',   label: 'Source Changed',   group: 'Playback' },
-    system_state:    { icon: '🔌',   label: 'System State',     group: 'Power' },
-    power_pressed:   { icon: '🟢',   label: 'Power',            group: 'Power' },
-    volume_change:   { icon: '🔊',   label: 'Volume',           group: 'Volume' },
-    art_changed:     { icon: '🖼️',   label: 'Art Changed',      group: 'Playback' },
+    preset_pressed:  { icon: '🎛️',  label: 'Preset Pressed',   group: 'Presets',  diagnostic: false },
+    play_item:       { icon: '▶️',   label: 'Play Item',        group: 'Playback', diagnostic: true  },
+    item_started:    { icon: '🎵',   label: 'Now Playing',      group: 'Playback', diagnostic: false },
+    play_state:      { icon: '⏯️',   label: 'Playback State',   group: 'Playback', diagnostic: true  },
+    source_changed:  { icon: '📻',   label: 'Source Changed',   group: 'Playback', diagnostic: true  },
+    system_state:    { icon: '🔌',   label: 'System State',     group: 'Power',    diagnostic: true  },
+    power_pressed:   { icon: '🟢',   label: 'Power',            group: 'Power',    diagnostic: false },
+    volume_change:   { icon: '🔊',   label: 'Volume',           group: 'Volume',   diagnostic: true  },
+    art_changed:     { icon: '🖼️',   label: 'Art Changed',      group: 'Playback', diagnostic: true  },
     // ── WebSocket (connection) ────────────────────────────────────────────
-    connection_state:{ icon: '📶',   label: 'WiFi State',       group: 'Network' },
+    connection_state:{ icon: '📶',   label: 'WiFi State',       group: 'Network',  diagnostic: true  },
     // ── WebSocket (now playing / volume / preset) — legacy ────────────────
-    now_playing:     { icon: '▶️',   label: 'Now Playing',      group: 'Playback' },
-    volume_changed:  { icon: '🔊',   label: 'Volume',           group: 'Volume' },
-    preset_changed:  { icon: '🎛️',   label: 'Preset Changed',   group: 'Presets' },
+    now_playing:     { icon: '▶️',   label: 'Now Playing',      group: 'Playback', diagnostic: true  },
+    volume_changed:  { icon: '🔊',   label: 'Volume',           group: 'Volume',   diagnostic: true  },
+    preset_changed:  { icon: '🎛️',   label: 'Preset Changed',   group: 'Presets',  diagnostic: false },
   };
 
   function meta(type) {
-    return EVENT_META[type] || { icon: '📋', label: type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), group: 'Other' };
+    return EVENT_META[type] || { icon: '📋', label: type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), group: 'Other', diagnostic: false };
+  }
+
+  // ── Event pre-processing ─────────────────────────────────────────────────
+  // The clean view is already handled by DIAGNOSTIC_TYPES (play_item, now_playing,
+  // volume_*, play_state, art_changed, connection_state, system_state are all
+  // marked diagnostic: true and stripped from the default view).
+  //
+  // This function handles the one remaining case: item_started events whose
+  // station resolves to STANDBY should be dropped from both views.
+  function preprocessEvents(rawEvents) {
+    return rawEvents.filter(ev => {
+      if (ev.type === 'item_started' || ev.type === 'now_playing') {
+        const d = ev.data || {};
+        const src = (d.source || '').toUpperCase();
+        const summary = (d._summary || d.itemName || '').trim();
+        if (src === 'STANDBY' || summary.toUpperCase() === 'STANDBY' || (!src && !summary)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }
+
+  // Diagnostic event types — hidden by default, revealed when diagnostics on
+  const DIAGNOSTIC_TYPES = new Set(
+    Object.entries(EVENT_META)
+      .filter(([, v]) => v.diagnostic)
+      .map(([k]) => k)
+  );
+
+  function isDiagnostic(ev) {
+    return DIAGNOSTIC_TYPES.has(ev.type);
   }
 
   // ── Summary builder ──────────────────────────────────────────────────────
@@ -2071,45 +2103,86 @@ function renderDeviceEvents(main, deviceId) {
 
   // ── Filter bar ───────────────────────────────────────────────────────────
   let activeFilter = 'all';
+  let showDiagnostics = false;
 
-  function buildFilterBar(events, listContainer) {
-    // Count by group so we don't have 9 separate buttons
-    const groupCounts = {};
-    for (const ev of events) {
-      const g = meta(ev.type).group;
-      groupCounts[g] = (groupCounts[g] || 0) + 1;
-    }
-    const groups = Object.keys(groupCounts).sort();
+  function buildFilterBar(allEvents, cleanEvents, listContainer) {
+    // cleanEvents = preprocessed (no standby, deduped now_playing, etc.)
+    // allEvents   = full raw list used when diagnostics are on
 
     const filterEl = main.querySelector('#events-filter');
-    filterEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:1rem;';
+    filterEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:1rem;align-items:center;';
 
-    function makeBtn(label, value, count) {
-      const isActive = value === activeFilter;
-      const btn = document.createElement('button');
-      btn.style.cssText = [
-        'cursor:pointer', 'padding:0.25rem 0.65rem',
-        'border:1px solid var(--border)', 'border-radius:999px', 'font-size:0.78rem',
-        `background:${isActive ? 'var(--accent,#1a73e8)' : 'var(--surface)'}`,
-        `color:${isActive ? '#fff' : 'inherit'}`,
-      ].join(';');
-      btn.textContent = count !== undefined ? `${label} (${count})` : label;
-      btn.addEventListener('click', () => {
-        activeFilter = value;
-        renderList(events, listContainer);
-        filterEl.innerHTML = '';
-        buildButtons();
-      });
-      return btn;
+    function activeEvents() {
+      const base = showDiagnostics ? allEvents : cleanEvents;
+      return base;
     }
 
-    function buildButtons() {
+    function groupCounts(events) {
+      const counts = {};
+      for (const ev of events) {
+        const g = meta(ev.type).group;
+        counts[g] = (counts[g] || 0) + 1;
+      }
+      return counts;
+    }
+
+    function rebuild() {
+      filterEl.innerHTML = '';
+      const events = activeEvents();
+      const counts = groupCounts(events);
+      const groups = Object.keys(counts).sort();
+
+      function makeBtn(label, value, count) {
+        const isActive = value === activeFilter;
+        const btn = document.createElement('button');
+        btn.style.cssText = [
+          'cursor:pointer', 'padding:0.25rem 0.65rem',
+          'border:1px solid var(--border)', 'border-radius:999px', 'font-size:0.78rem',
+          `background:${isActive ? 'var(--accent,#1a73e8)' : 'var(--surface)'}`,
+          `color:${isActive ? '#fff' : 'inherit'}`,
+        ].join(';');
+        btn.textContent = count !== undefined ? `${label} (${count})` : label;
+        btn.addEventListener('click', () => {
+          activeFilter = value;
+          rebuild();
+          renderList(activeEvents(), listContainer);
+        });
+        return btn;
+      }
+
       filterEl.appendChild(makeBtn('All', 'all', events.length));
       for (const g of groups) {
-        filterEl.appendChild(makeBtn(g, g, groupCounts[g]));
+        filterEl.appendChild(makeBtn(g, g, counts[g]));
       }
+
+      // Diagnostics toggle — right-aligned separator + pill
+      const sep = document.createElement('span');
+      sep.style.cssText = 'flex:1';
+      filterEl.appendChild(sep);
+
+      const diagBtn = document.createElement('button');
+      diagBtn.style.cssText = [
+        'cursor:pointer', 'padding:0.25rem 0.65rem',
+        'border:1px solid var(--border)', 'border-radius:999px', 'font-size:0.75rem',
+        `background:${showDiagnostics ? 'var(--surface-alt,#2a2f3a)' : 'transparent'}`,
+        'color:var(--text-muted,rgba(255,255,255,0.45))',
+        'display:flex;align-items:center;gap:0.3rem',
+      ].join(';');
+      diagBtn.innerHTML = (showDiagnostics ? '🔬' : '🔬') + ` Diagnostics${showDiagnostics ? ' ✓' : ''}`;
+      diagBtn.title = showDiagnostics
+        ? 'Hide diagnostic events (Playback State, Art Changed, WiFi State, System State, Volume, raw Now Playing)'
+        : 'Show all diagnostic events including Volume, WiFi, raw Now Playing and more';
+      diagBtn.addEventListener('click', () => {
+        showDiagnostics = !showDiagnostics;
+        // reset group filter when toggling — counts change
+        activeFilter = 'all';
+        rebuild();
+        renderList(activeEvents(), listContainer);
+      });
+      filterEl.appendChild(diagBtn);
     }
-    buildButtons();
+
+    rebuild();
   }
 
   // ── Event list ───────────────────────────────────────────────────────────
@@ -2142,6 +2215,14 @@ function renderDeviceEvents(main, deviceId) {
       const summary = formatSummary(ev);
       const d = ev.data || {};
 
+      // Friendly source label for Now Playing events
+      const SOURCE_LABELS = { LOCAL_INTERNET_RADIO: 'Internet Radio', TUNEIN: 'TuneIn', SPOTIFY: 'Spotify' };
+      const rawSource = d.source || d.nowPlaying?.contentItem?.source || '';
+      const sourceLabel = SOURCE_LABELS[rawSource] || '';
+      const sourcePart = sourceLabel
+        ? `<span style="font-size:0.7rem;opacity:0.6;background:var(--surface-alt,rgba(255,255,255,0.08));border-radius:3px;padding:0 0.3em;margin-right:0.35em">${escapeHtml(sourceLabel)}</span>`
+        : '';
+
       // Show album art thumbnail for item_started events when available
       const artUrl = d.containerArt || (d.nowPlaying?.art?.text) || '';
       const thumb = artUrl
@@ -2155,6 +2236,7 @@ function renderDeviceEvents(main, deviceId) {
         `<div class="list-item-body">` +
           `<div class="list-item-title">${escapeHtml(m.label)}</div>` +
           `<div class="list-item-subtitle">` +
+            sourcePart +
             (summary ? escapeHtml(summary) + ' &middot; ' : '') + escapeHtml(ts) +
           `</div>` +
         `</div>`;
@@ -2163,14 +2245,20 @@ function renderDeviceEvents(main, deviceId) {
   }
 
   // ── Load ─────────────────────────────────────────────────────────────────
+  let allRawEvents = [];
+  let cleanedEvents = [];
+
   (async () => {
     try {
       const data = await api.mgmtGet(`/mgmt/devices/${deviceId}/events?limit=200`);
-      const events = data.events || [];
+      // Tag each event with a stable index for dedup tracking
+      allRawEvents = (data.events || []).map((ev, i) => ({ ...ev, _idx: i }));
+      cleanedEvents = preprocessEvents(allRawEvents).filter(ev => !DIAGNOSTIC_TYPES.has(ev.type));
+
       const summaryEl  = main.querySelector('#events-summary');
       const listContainer = main.querySelector('#events-list');
 
-      if (events.length === 0) {
+      if (allRawEvents.length === 0) {
         listContainer.innerHTML = `
           <div class="empty-state">
             <div class="empty-state-icon">📋</div>
@@ -2181,9 +2269,9 @@ function renderDeviceEvents(main, deviceId) {
         return;
       }
 
-      summaryEl.innerHTML = buildSummaryCard(events);
-      buildFilterBar(events, listContainer);
-      renderList(events, listContainer);
+      summaryEl.innerHTML = buildSummaryCard(allRawEvents);
+      buildFilterBar(allRawEvents, cleanedEvents, listContainer);
+      renderList(cleanedEvents, listContainer);
 
     } catch (err) {
       showToast(err.message, 'error');
