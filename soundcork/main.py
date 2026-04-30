@@ -4,6 +4,7 @@ import os
 import re
 import secrets as _secrets_mod
 import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as defused_ET
 from contextlib import asynccontextmanager
 from datetime import datetime
 from http import HTTPStatus
@@ -301,7 +302,7 @@ def _decode_content_item(b64: str) -> dict:
 
     try:
         xml_bytes = base64.b64decode(b64)
-        root = ET.fromstring(xml_bytes)
+        root = defused_ET.fromstring(xml_bytes)
         return {
             "source": root.get("source", ""),
             "type": root.get("type", ""),
