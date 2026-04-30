@@ -4,12 +4,12 @@ import os
 import re
 import secrets as _secrets_mod
 import xml.etree.ElementTree as ET
-import defusedxml.ElementTree as defused_ET
 from contextlib import asynccontextmanager
 from datetime import datetime
 from http import HTTPStatus
 from typing import Annotated
 
+import defusedxml.ElementTree as defused_ET
 from fastapi import Depends, FastAPI, HTTPException, Path, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi_etag import Etag
