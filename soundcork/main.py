@@ -346,7 +346,6 @@ def _summarise_inner(inner_type: str, d: dict) -> tuple[str, str]:
             ci = _decode_content_item(ci)
         name = ci.get("itemName", "") if isinstance(ci, dict) else ""
         source = ci.get("source", "") if isinstance(ci, dict) else ""
-        art = ci.get("containerArt", "") if isinstance(ci, dict) else ""
         summary = name or source or "Item started"
         if source and name:
             summary = f"{name} ({source})"
