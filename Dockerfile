@@ -23,7 +23,7 @@ WORKDIR /app
 # gosu: privilege-drop helper used by entrypoint.sh for runtime PUID/PGID
 # remapping. Installed in a single layer and apt cache cleared immediately.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gosu && \
+    apt-get install -y --no-install-recommends gosu openssh-client && \
     rm -rf /var/lib/apt/lists/*
 
 # ── Python dependencies ────────────────────────────────────────────────────

@@ -66,6 +66,9 @@ SPEAKER_PRESETS_PATH = "/presets"
 # this one needs to be pulled from a device
 SPEAKER_SOURCES_FILE_LOCATION = "/mnt/nv/BoseApp-Persistence/1/Sources.xml"
 
+# per-device event log (JSON, ring-buffered at 200 entries)
+EVENTS_FILE = "Events.json"
+
 # validation
 ACCOUNT_RE = r"^\d{1,20}$"
 DEVICE_RE = "^[0-9a-fA-F]{12}$"

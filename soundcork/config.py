@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # Disable if speakers self-prime at boot via /mnt/nv/rc.local
     zeroconf_primer_enabled: bool = True
 
+    # SSH key for direct speaker access (preset sync).
+    # Must be an RSA private key — speakers run OpenSSH 6.6 (ssh-rsa only).
+    # Set in .env.private, e.g.: speaker_ssh_key=/home/soundcork/.ssh/speaker_rsa
+    speaker_ssh_key: str = ""
+
     # OIDC authentication (optional — when all three are set, OIDC is enabled)
     oidc_issuer_url: str = ""
     oidc_client_id: str = ""
