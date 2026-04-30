@@ -360,8 +360,8 @@ class DataStore:
             logger.warning("Events.json for %s is corrupt, resetting", device_id)
             return []
 
-    def list_accounts(self) -> list[Optional[str]]:
-        accounts: list[str | None] = []
+    def list_accounts(self) -> list[str]:
+        accounts: list[str] = []
         for account_id in next(walk(self.data_dir))[1]:
             accounts.append(account_id)
 
