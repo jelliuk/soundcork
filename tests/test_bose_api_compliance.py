@@ -184,10 +184,12 @@ def client(data_dir):
     original_allowlist = main_mod._speaker_allowlist
     main_mod._speaker_allowlist = _make_allowlist("127.0.0.1")
 
-    with (
-        patch.object(Settings, "data_dir", new_callable=lambda: property(lambda self: base)),
-        patch.object(Settings, "mgmt_password", new_callable=lambda: property(lambda self: "test_password_123")),
-    ):
+    # Patch the environment before Settings is loaded
+    with patch.dict("os.environ", {"data_dir": base, "mgmt_password": "test_password_123"}):
+        # Force reload of settings if already instantiated
+        import importlib
+        importlib.reload(main_mod)
+        
         with TestClient(main_mod.app) as c:
             yield c, account_id, device_id
 
