@@ -149,7 +149,8 @@ def data_dir():
     with open(os.path.join(account_path, "Recents.xml"), "w") as f:
         f.write(recents)
 
-    # Sources.xml
+    # Sources.xml — must live at account level (datastore.py reads account_dir/Sources.xml)
+    # Sources also copied to device directory for any code that reads from there
     sources = """<?xml version="1.0" encoding="UTF-8" ?>
 <sources>
     <source displayName="AUX IN" secret="" secretType="">
@@ -164,6 +165,97 @@ def data_dir():
 </sources>"""
     with open(os.path.join(account_path, "Sources.xml"), "w") as f:
         f.write(sources)
+    # Also write to device dir — some code paths resolve it via device directory
+    with open(os.path.join(devices_path, "Sources.xml"), "w") as f:
+        f.write(sources)
+
+    # bmx_services.json — the app reads this from the working directory (soundcork/).
+    # We write it into the base temp dir and patch the CWD via monkeypatching in the
+    # client fixture below. A copy is also placed in the project soundcork/ dir at
+    # test time so the fallback open("bmx_services.json") in main.py resolves correctly.
+    import json as _json
+    bmx_services = {
+        "_links": {"bmx_services_availability": {"href": "../servicesAvailability"}},
+        "askAgainAfter": 1230482,
+        "bmx_services": [
+            {
+                "_links": {
+                    "bmx_navigate": {"href": "/v1/navigate"},
+                    "bmx_token": {"href": "/v1/token"},
+                    "self": {"href": "/"},
+                },
+                "askAdapter": False,
+                "assets": {
+                    "color": "#000000",
+                    "description": "TuneIn radio service",
+                    "icons": {
+                        "defaultAlbumArt": "http://testserver/media/tunein-default-album-art.png",
+                        "largeSvg": "http://testserver/media/tunein-smallSvg.svg",
+                        "monochromePng": "http://testserver/media/tunein-monochromePng.png",
+                        "monochromeSvg": "http://testserver/media/tunein-monochromeSvg.svg",
+                        "smallSvg": "http://testserver/media/tunein-smallSvg.svg",
+                    },
+                    "name": "TuneIn",
+                },
+                "authenticationModel": {
+                    "anonymousAccount": {"autoCreate": True, "enabled": True}
+                },
+                "baseUrl": "http://testserver/bmx/tunein",
+                "id": {"name": "TUNEIN", "value": 25},
+                "streamTypes": ["liveRadio", "onDemand"],
+            },
+            {
+                "_links": {"bmx_token": {"href": "/token"}, "self": {"href": "/"}},
+                "askAdapter": False,
+                "assets": {
+                    "color": "#000000",
+                    "description": "Custom radio stations",
+                    "icons": {
+                        "largeSvg": "http://testserver/media/orion-monochrome.svg",
+                        "monochromePng": "http://testserver/media/orion-monochrome_v2.png",
+                        "monochromeSvg": "http://testserver/media/orion-monochrome.svg",
+                        "smallSvg": "http://testserver/media/orion-monochrome.svg",
+                    },
+                    "name": "Custom Stations",
+                },
+                "authenticationModel": {
+                    "anonymousAccount": {"autoCreate": True, "enabled": True}
+                },
+                "baseUrl": "http://testserver/core02/svc-bmx-adapter-orion/prod/orion",
+                "id": {"name": "LOCAL_INTERNET_RADIO", "value": 11},
+                "streamTypes": ["liveRadio"],
+            },
+            {
+                "_links": {
+                    "bmx_navigate": {"href": "/v1/navigate"},
+                    "bmx_token": {"href": "/v1/token"},
+                    "self": {"href": "/"},
+                },
+                "askAdapter": False,
+                "assets": {
+                    "color": "#000000",
+                    "description": "RadioBrowser community radio directory",
+                    "icons": {
+                        "largeSvg": "http://testserver/media/orion-monochrome.svg",
+                        "monochromePng": "http://testserver/media/orion-monochrome_v2.png",
+                        "monochromeSvg": "http://testserver/media/orion-monochrome.svg",
+                        "smallSvg": "http://testserver/media/orion-monochrome.svg",
+                    },
+                    "name": "RadioBrowser",
+                },
+                "authenticationModel": {
+                    "anonymousAccount": {"autoCreate": True, "enabled": True}
+                },
+                "baseUrl": "https://all.api.radio-browser.info/soundtouch",
+                "id": {"name": "RADIO_BROWSER", "value": 39},
+                "streamTypes": ["liveRadio", "onDemand"],
+            },
+        ],
+    }
+    bmx_json_str = _json.dumps(bmx_services, indent=2)
+    # Write to temp base dir
+    with open(os.path.join(base, "bmx_services.json"), "w") as f:
+        f.write(bmx_json_str)
 
     yield base, account_id, device_id
     shutil.rmtree(base, ignore_errors=True)
@@ -175,25 +267,59 @@ def client(data_dir):
     TestClient configured with the test datastore. All Bose-protocol
     endpoints are accessed via loopback (127.0.0.1) so the IP allowlist
     middleware passes them through.
+
+    Settings are injected via environment variables (patch.dict) rather than
+    patch.object on property descriptors — the latter triggers a
+    'coroutine raised StopIteration' error with module-scoped fixtures on
+    Python 3.12.
+
+    The working directory is temporarily changed to base so that the app's
+    bare open("bmx_services.json") resolves to the file created by the
+    data_dir fixture rather than requiring it in the project source tree.
     """
+    import importlib
+    import os as _os
+    import json as _json
+    import shutil as _shutil
+
     base, account_id, device_id = data_dir
 
-    import soundcork.main as main_mod
-    from soundcork.config import Settings
+    # Patch env vars BEFORE importing/reloading soundcork.main so that
+    # pydantic-settings picks them up when Settings() is instantiated.
+    env_overrides = {
+        "data_dir": base,
+        "mgmt_password": "test_password_123",
+        "MGMT_PASSWORD": "test_password_123",
+    }
 
-    original_allowlist = main_mod._speaker_allowlist
-    main_mod._speaker_allowlist = _make_allowlist("127.0.0.1")
-
-    # Patch the environment before Settings is loaded
-    with patch.dict("os.environ", {"data_dir": base, "mgmt_password": "test_password_123"}):
-        # Force reload of settings if already instantiated
-        import importlib
+    with patch.dict("os.environ", env_overrides):
+        # Reload so Settings() re-reads the patched environment.
+        import soundcork.main as main_mod
         importlib.reload(main_mod)
-        
-        with TestClient(main_mod.app) as c:
-            yield c, account_id, device_id
 
-    main_mod._speaker_allowlist = original_allowlist
+        original_allowlist = main_mod._speaker_allowlist
+        main_mod._speaker_allowlist = _make_allowlist("127.0.0.1")
+
+        # Change CWD so bare open("bmx_services.json") in main.py resolves
+        # to the copy written into base by the data_dir fixture.
+        original_cwd = _os.getcwd()
+        _os.chdir(base)
+
+        try:
+            # Mirror bmx_services.json into a soundcork/ subdir of base so
+            # that code running from that subdirectory also finds the file.
+            soundcork_subdir = _os.path.join(base, "soundcork")
+            _os.makedirs(soundcork_subdir, exist_ok=True)
+            _shutil.copy(
+                _os.path.join(base, "bmx_services.json"),
+                _os.path.join(soundcork_subdir, "bmx_services.json"),
+            )
+
+            with TestClient(main_mod.app) as c:
+                yield c, account_id, device_id
+        finally:
+            _os.chdir(original_cwd)
+            main_mod._speaker_allowlist = original_allowlist
 
 
 @pytest.fixture(scope="module")
@@ -215,10 +341,23 @@ def tc(client):
 # ---------------------------------------------------------------------------
 
 def parse_xml(response) -> ET.Element:
-    """Assert the response is XML and return the root element."""
+    """Assert the response is XML and return the root element.
+
+    On failure the assertion message includes status, content-type and body
+    so failures are immediately diagnostic without digging into logs.
+    """
     ct = response.headers.get("content-type", "")
-    assert "xml" in ct, f"Expected XML content-type, got: {ct!r}"
-    root = ET.fromstring(response.text)
+    assert "xml" in ct, (
+        f"Expected XML content-type, got {ct!r} "
+        f"(status={response.status_code}, body={response.text[:300]!r})"
+    )
+    try:
+        root = ET.fromstring(response.text)
+    except ET.ParseError as exc:
+        raise AssertionError(
+            f"Response is not valid XML: {exc} "
+            f"(status={response.status_code}, body={response.text[:300]!r})"
+        ) from exc
     return root
 
 
@@ -1900,8 +2039,19 @@ class TestSoftwareUpdateSchema:
             f"/streaming/software/update/account/{account_id}",
             headers=LOOPBACK_HEADER,
         )
+        assert r.status_code == 200, (
+            f"Software update alias returned {r.status_code}; "
+            f"content-type={r.headers.get('content-type','?')!r} body={r.text[:200]!r}"
+        )
+        ct = r.headers.get("content-type", "")
+        assert "xml" in ct, (
+            f"Alias /streaming/software/update/... returned content-type {ct!r} "
+            f"instead of XML — alias route may be missing or returning JSON error"
+        )
         root = parse_xml(r)
-        assert root.tag == "software_update"
+        assert root.tag == "software_update", (
+            f"Root tag must be 'software_update', got '{root.tag}'"
+        )
         loc = root.findtext("softwareUpdateLocation") or ""
         assert "http" not in loc.lower()
 
