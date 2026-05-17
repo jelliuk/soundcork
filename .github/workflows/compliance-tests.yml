@@ -39,6 +39,12 @@ jobs:
     # Never block a deployment — this job is advisory until the suite is green
     continue-on-error: true
 
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+      issues: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
