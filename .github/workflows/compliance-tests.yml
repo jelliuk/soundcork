@@ -1,0 +1,226 @@
+name: Bose API Compliance Tests
+
+# Runs independently of the Docker build pipeline.
+# Triggered manually, on PRs, or on a schedule — never blocks a build.
+on:
+  # Run manually from the Actions tab with optional inputs
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to test'
+        required: false
+        default: 'dev'
+        type: string
+      skip_live:
+        description: 'Skip tests that require outbound network (TuneIn)'
+        required: false
+        default: true
+        type: boolean
+
+  # Run automatically on PRs to main or dev
+  pull_request:
+    branches: [main, dev]
+    paths:
+      # Only trigger when soundcork source or the tests themselves change
+      - 'soundcork/**'
+      - 'tests/test_bose_api_compliance.py'
+      - 'tests/conftest.py'
+      - 'requirements.txt'
+
+  # Weekly scheduled run to catch drift even without code changes
+  schedule:
+    - cron: '0 6 * * 1'   # Monday 06:00 UTC
+
+jobs:
+  compliance:
+    name: Bose API Compliance
+    runs-on: ubuntu-latest
+
+    # Never block a deployment — this job is advisory until the suite is green
+    continue-on-error: true
+
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.branch || github.head_ref || github.ref }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+
+      - name: Determine test markers to skip
+        id: markers
+        run: |
+          # Skip live (network) tests when running in CI or when explicitly requested
+          SKIP_LIVE="${{ inputs.skip_live }}"
+          if [ "$SKIP_LIVE" = "true" ] || [ -z "$SKIP_LIVE" ]; then
+            echo "deselect=-m 'not live'" >> "$GITHUB_OUTPUT"
+            echo "Skipping live/network tests"
+          else
+            echo "deselect=" >> "$GITHUB_OUTPUT"
+            echo "Running all tests including live/network tests"
+          fi
+
+      - name: Run Bose API compliance tests
+        env:
+          # Provide a known mgmt password so the test fixtures initialise correctly
+          MGMT_PASSWORD: test_compliance_password_ci
+          # Point to a temp directory — the fixture creates its own datastore
+          DATA_DIR: /tmp/soundcork_ci_data
+        run: |
+          pytest tests/test_bose_api_compliance.py \
+            -v \
+            --tb=short \
+            ${{ steps.markers.outputs.deselect }} \
+            --cov=soundcork \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage-compliance.xml \
+            --junitxml=compliance-results.xml \
+            -p no:warnings \
+          || true   # collect results even on failure; continue-on-error handles job status
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compliance-test-results
+          path: |
+            compliance-results.xml
+            coverage-compliance.xml
+          retention-days: 30
+
+      - name: Publish test summary
+        if: always()
+        run: |
+          echo "## Bose API Compliance Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f compliance-results.xml ]; then
+            python3 - << 'PYEOF'
+          import xml.etree.ElementTree as ET, os
+
+          tree = ET.parse('compliance-results.xml')
+          root = tree.getroot()
+
+          # JUnit XML: <testsuite tests="N" failures="F" errors="E" skipped="S">
+          suite = root if root.tag == 'testsuite' else root.find('testsuite')
+          if suite is None:
+              print("Could not parse results XML")
+          else:
+              total    = int(suite.get('tests', 0))
+              failures = int(suite.get('failures', 0))
+              errors   = int(suite.get('errors', 0))
+              skipped  = int(suite.get('skipped', 0))
+              passed   = total - failures - errors - skipped
+
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(f'| Passed | Failed | Errors | Skipped | Total |\n')
+              f.write(f'|--------|--------|--------|---------|-------|\n')
+              f.write(f'| {passed} | {failures} | {errors} | {skipped} | {total} |\n')
+              f.write('\n')
+
+              # List failed tests
+              failed_cases = [
+                  tc for tc in root.iter('testcase')
+                  if tc.find('failure') is not None or tc.find('error') is not None
+              ]
+              if failed_cases:
+                  f.write('### ❌ Failing Tests\n\n')
+                  for tc in failed_cases:
+                      classname = tc.get('classname', '').split('.')[-1]
+                      name = tc.get('name', '')
+                      msg_el = tc.find('failure') or tc.find('error')
+                      msg = (msg_el.get('message', '') if msg_el is not None else '')[:200]
+                      f.write(f'- `{classname}::{name}`\n')
+                      if msg:
+                          f.write(f'  > {msg}\n')
+                  f.write('\n')
+              else:
+                  f.write('### ✅ All tests passed\n\n')
+
+              # Category breakdown
+              f.write('<details><summary>Results by category</summary>\n\n')
+              categories = {}
+              for tc in root.iter('testcase'):
+                  cls = tc.get('classname', '').split('.')[-1]
+                  if cls not in categories:
+                      categories[cls] = {'pass': 0, 'fail': 0}
+                  if tc.find('failure') is not None or tc.find('error') is not None:
+                      categories[cls]['fail'] += 1
+                  elif tc.find('skipped') is None:
+                      categories[cls]['pass'] += 1
+              f.write('| Class | Pass | Fail |\n|-------|------|------|\n')
+              for cls, counts in sorted(categories.items()):
+                  icon = '✅' if counts['fail'] == 0 else '❌'
+                  f.write(f'| {icon} `{cls}` | {counts["pass"]} | {counts["fail"]} |\n')
+              f.write('\n</details>\n')
+          PYEOF
+          else
+            echo "No results XML found — tests may not have run" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Comment on PR with results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (!fs.existsSync('compliance-results.xml')) return;
+
+            const { execSync } = require('child_process');
+            const summary = execSync(`python3 -c "
+            import xml.etree.ElementTree as ET
+            tree = ET.parse('compliance-results.xml')
+            root = tree.getroot()
+            suite = root if root.tag == 'testsuite' else root.find('testsuite')
+            if suite is None:
+                print('Could not parse results')
+            else:
+                t = int(suite.get('tests', 0))
+                f = int(suite.get('failures', 0))
+                e = int(suite.get('errors', 0))
+                s = int(suite.get('skipped', 0))
+                p = t - f - e - s
+                status = '✅ All passing' if (f + e) == 0 else f'❌ {f + e} failing'
+                print(f'{status} — {p}/{t} tests passed, {s} skipped')
+            "`).toString().trim();
+
+            const body = `### 🔊 Bose API Compliance Tests\n\n${summary}\n\n` +
+              `[Full results →](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
+
+            // Find and update existing comment, or create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.includes('Bose API Compliance Tests'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

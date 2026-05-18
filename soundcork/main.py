@@ -198,7 +198,7 @@ async def log_unknown_requests(request: Request, call_next):
 # Bose protocol endpoints are only accessible from registered speaker IPs.
 # Paths starting with /webui, /mgmt, /docs, /openapi.json, or / (root) are exempt.
 
-_EXEMPT_PREFIXES = ("/webui", "/mgmt", "/docs", "/openapi.json", "/auth")
+_EXEMPT_PREFIXES = ("/webui", "/mgmt", "/docs", "/openapi.json", "/auth", "/media")
 
 
 @app.middleware("http")
@@ -1185,6 +1185,7 @@ app.add_api_route(
     account_full,
     methods=["GET"],
     tags=["marge-alias"],
+    response_class=BoseXMLResponse,
 )
 app.add_api_route("/streaming/support/power_on", power_on, methods=["POST"], tags=["marge-alias"])
 app.add_api_route(
@@ -1198,6 +1199,7 @@ app.add_api_route(
     account_presets,
     methods=["GET"],
     tags=["marge-alias"],
+    response_class=BoseXMLResponse,
 )
 app.add_api_route(
     "/streaming/account/{account}/device/{device}/preset/{preset_number}",
@@ -1222,6 +1224,7 @@ app.add_api_route(
     software_update,
     methods=["GET"],
     tags=["marge-alias"],
+    response_class=BoseXMLResponse,
 )
 app.add_api_route(
     "/streaming/account/{account}/device/{device}/recent",
@@ -1274,6 +1277,7 @@ app.add_api_route(
     account_full,
     methods=["GET"],
     tags=["marge-alias"],
+    response_class=BoseXMLResponse,
 )
 app.add_api_route("/accounts/{account}/full", account_full, methods=["GET"], tags=["marge-alias"])
 app.add_api_route(

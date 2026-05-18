@@ -64,6 +64,25 @@ def preset_xml(preset: Preset, conf_sources_list: list[ConfiguredSource]) -> ET.
     ET.SubElement(preset_element, "name").text = preset.name
     preset_element.append(content_item_source_xml(conf_sources_list, preset))
     ET.SubElement(preset_element, "updatedOn").text = updated_on
+
+    # Resolve the account username for this preset's source.
+    # Falls back to empty string for anonymous sources (e.g. TUNEIN).
+    username = ""
+    try:
+        if preset.source_id:
+            matching = next(cs for cs in conf_sources_list if cs.id == preset.source_id)
+        else:
+            matching = next(
+                cs for cs in conf_sources_list
+                if cs.source_key_type == preset.source
+                and (cs.source_key_account == preset.source_account
+                     or (not cs.source_key_account and not preset.source_account))
+            )
+        username = matching.source_key_account or ""
+    except StopIteration:
+        pass
+
+    ET.SubElement(preset_element, "username").text = username
     return preset_element
 
 
@@ -225,6 +244,7 @@ def recents_xml(
         ET.SubElement(recent_element, "location").text = recent.location
         ET.SubElement(recent_element, "name").text = recent.name
         recent_element.append(content_item_source_xml(conf_sources_list, recent))
+        ET.SubElement(recent_element, "sourceid").text = recent.source_id or ""
         ET.SubElement(recent_element, "updatedOn").text = lastplayed
 
     return recents_element
@@ -313,6 +333,7 @@ def add_recent(datastore: "DataStore", account: str, device: str, source_xml: by
     ET.SubElement(recent_element, "location").text = recent_obj.location
     ET.SubElement(recent_element, "name").text = recent_obj.name
     recent_element.append(content_item_source_xml(conf_sources_list, recent_obj))
+    ET.SubElement(recent_element, "sourceid").text = recent_obj.source_id or ""
     ET.SubElement(recent_element, "updatedOn").text = lastplayed
 
     return recent_element
